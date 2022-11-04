@@ -1,0 +1,91 @@
+[0/1] Re-running CMake...
+-- Project is not inside a git repository, or git repository has no commits; will not use 'git describe' to determine PROJECT_VER.
+-- Building ESP-IDF components for target esp32
+-- Project sdkconfig file /root/code/esp32/projects/sample_project/sdkconfig
+-- App "main" version: 1
+-- Adding linker script /root/code/esp32/projects/sample_project/build/esp-idf/esp_system/ld/memory.ld
+-- Adding linker script /esp-idf/components/esp_system/ld/esp32/sections.ld.in
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.api.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.libgcc.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.newlib-data.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.syscalls.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.newlib-funcs.ld
+-- Adding linker script /esp-idf/components/soc/esp32/ld/esp32.peripherals.ld
+-- Components: app_trace app_update bootloader bootloader_support bt cmock console cxx driver efuse esp-tls esp_adc esp_app_format esp_common esp_eth esp_event esp_gdbstub esp_hid esp_http_client esp_http_server esp_https_ota esp_https_server esp_hw_support esp_lcd esp_local_ctrl esp_netif esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_serial_slave_link esp_system esp_timer esp_wifi espcoredump esptool_py fatfs freertos hal heap http_parser idf_test ieee802154 json log lwip main mbedtls mqtt newlib nvs_flash openthread partition_table perfmon protobuf-c protocomm pthread sdmmc soc spi_flash spiffs tcp_transport tinyusb ulp unity usb vfs wear_levelling wifi_provisioning wpa_supplicant xtensa
+-- Component paths: /esp-idf/components/app_trace /esp-idf/components/app_update /esp-idf/components/bootloader /esp-idf/components/bootloader_support /esp-idf/components/bt /esp-idf/components/cmock /esp-idf/components/console /esp-idf/components/cxx /esp-idf/components/driver /esp-idf/components/efuse /esp-idf/components/esp-tls /esp-idf/components/esp_adc /esp-idf/components/esp_app_format /esp-idf/components/esp_common /esp-idf/components/esp_eth /esp-idf/components/esp_event /esp-idf/components/esp_gdbstub /esp-idf/components/esp_hid /esp-idf/components/esp_http_client /esp-idf/components/esp_http_server /esp-idf/components/esp_https_ota /esp-idf/components/esp_https_server /esp-idf/components/esp_hw_support /esp-idf/components/esp_lcd /esp-idf/components/esp_local_ctrl /esp-idf/components/esp_netif /esp-idf/components/esp_phy /esp-idf/components/esp_pm /esp-idf/components/esp_psram /esp-idf/components/esp_ringbuf /esp-idf/components/esp_rom /esp-idf/components/esp_serial_slave_link /esp-idf/components/esp_system /esp-idf/components/esp_timer /esp-idf/components/esp_wifi /esp-idf/components/espcoredump /esp-idf/components/esptool_py /esp-idf/components/fatfs /esp-idf/components/freertos /esp-idf/components/hal /esp-idf/components/heap /esp-idf/components/http_parser /esp-idf/components/idf_test /esp-idf/components/ieee802154 /esp-idf/components/json /esp-idf/components/log /esp-idf/components/lwip /root/code/esp32/projects/sample_project/main /esp-idf/components/mbedtls /esp-idf/components/mqtt /esp-idf/components/newlib /esp-idf/components/nvs_flash /esp-idf/components/openthread /esp-idf/components/partition_table /esp-idf/components/perfmon /esp-idf/components/protobuf-c /esp-idf/components/protocomm /esp-idf/components/pthread /esp-idf/components/sdmmc /esp-idf/components/soc /esp-idf/components/spi_flash /esp-idf/components/spiffs /esp-idf/components/tcp_transport /esp-idf/components/tinyusb /esp-idf/components/ulp /esp-idf/components/unity /esp-idf/components/usb /esp-idf/components/vfs /esp-idf/components/wear_levelling /esp-idf/components/wifi_provisioning /esp-idf/components/wpa_supplicant /esp-idf/components/xtensa
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /root/code/esp32/projects/sample_project/build
+[1/10] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj
+/root/code/esp32/projects/sample_project/main/main.c:9:20: warning: 'TAG' defined but not used [-Wunused-variable]
+    9 | static const char* TAG="MyModule";
+      |                    ^~~
+[2/10] Linking C static library esp-idf/main/libmain.a
+[3/10] Generating ld/sections.ld
+[4/10] Linking CXX executable main.elf
+[5/10] Generating binary image from built executable
+esptool.py v4.3
+Creating esp32 image...
+Merged 2 ELF sections
+Successfully created esp32 image.
+Generated /root/code/esp32/projects/sample_project/build/main.bin
+[6/10] cd /root/code/esp32/projects/sample_project/build/esp-idf/esptool_py && /root/.espressif/python_env/idf5.1_py3.10_env/bin/python /esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /root/code/esp32/projects/sample_project/build/partition_table/partition-table.bin /root/code/esp32/projects/sample_project/build/main.bin
+main.bin binary size 0x2b060 bytes. Smallest app partition is 0x100000 bytes. 0xd4fa0 bytes (83%) free.
+[7/10] Performing build step for 'bootloader'
+[0/1] Re-running CMake...
+-- Building ESP-IDF components for target esp32
+-- Project sdkconfig file /root/code/esp32/projects/sample_project/sdkconfig
+-- Adding linker script /esp-idf/components/soc/esp32/ld/esp32.peripherals.ld
+-- App "bootloader" version: v5.1-dev-437-g5c1044d84d
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.api.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.libgcc.ld
+-- Adding linker script /esp-idf/components/esp_rom/esp32/ld/esp32.rom.newlib-funcs.ld
+-- Adding linker script /esp-idf/components/bootloader/subproject/main/ld/esp32/bootloader.ld
+-- Adding linker script /esp-idf/components/bootloader/subproject/main/ld/esp32/bootloader.rom.ld
+-- Components: bootloader bootloader_support efuse esp_app_format esp_common esp_hw_support esp_rom esp_system esptool_py freertos hal log main micro-ecc newlib partition_table soc spi_flash xtensa
+-- Component paths: /esp-idf/components/bootloader /esp-idf/components/bootloader_support /esp-idf/components/efuse /esp-idf/components/esp_app_format /esp-idf/components/esp_common /esp-idf/components/esp_hw_support /esp-idf/components/esp_rom /esp-idf/components/esp_system /esp-idf/components/esptool_py /esp-idf/components/freertos /esp-idf/components/hal /esp-idf/components/log /esp-idf/components/bootloader/subproject/main /esp-idf/components/bootloader/subproject/components/micro-ecc /esp-idf/components/newlib /esp-idf/components/partition_table /esp-idf/components/soc /esp-idf/components/spi_flash /esp-idf/components/xtensa
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /root/code/esp32/projects/sample_project/build/bootloader
+[1/1] cd /root/code/esp32/projects/sample_project/build/bootloader/esp-idf/esptool_py && /root/.espressif/python_env/idf5.1_py3.10_env/bin/python /esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 /root/code/esp32/projects/sample_project/build/bootloader/bootloader.bin
+Bootloader binary size 0x66c0 bytes. 0x940 bytes (8%) free.
+[7/8] cd /esp-idf/components/esptool_py && /usr/bin/cmake -D IDF_PATH=/esp-idf -D "SERIAL_TOOL=/root/.espressif/python_env/idf5.1_py3.10_env/bin/python;;/esp-idf/components/esptool_py/esptool/esptool.py;--chip;esp32" -D "SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args" -D WORKING_DIRECTORY=/root/code/esp32/projects/sample_project/build -P /esp-idf/components/esptool_py/run_serial_tool.cmake
+esptool esp32 -p /dev/ttyUSB0 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 40m --flash_size 2MB 0x1000 bootloader/bootloader.bin 0x10000 main.bin 0x8000 partition_table/partition-table.bin
+esptool.py v4.3
+Serial port /dev/ttyUSB0
+Connecting.....
+Chip is ESP32-D0WD-V3 (revision v3.0)
+Features: WiFi, BT, Dual Core, 240MHz, VRef calibration in efuse, Coding Scheme None
+Crystal is 40MHz
+MAC: c0:49:ef:c9:25:44
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00001000 to 0x00007fff...
+Flash will be erased from 0x00010000 to 0x0003bfff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Compressed 26304 bytes to 16361...
+Writing at 0x00001000... (100 %)
+Wrote 26304 bytes (16361 compressed) at 0x00001000 in 0.7 seconds (effective 314.5 kbit/s)...
+Hash of data verified.
+Compressed 176224 bytes to 92805...
+Writing at 0x00010000... (16 %)
+Writing at 0x0001b614... (33 %)
+Writing at 0x00020ec0... (50 %)
+Writing at 0x00026668... (66 %)
+Writing at 0x0002f166... (83 %)
+Writing at 0x00037019... (100 %)
+Wrote 176224 bytes (92805 compressed) at 0x00010000 in 2.4 seconds (effective 583.5 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 103...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (103 compressed) at 0x00008000 in 0.0 seconds (effective 585.3 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
