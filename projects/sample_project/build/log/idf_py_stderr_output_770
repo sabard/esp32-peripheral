@@ -1,0 +1,77 @@
+[0;33m--- idf_monitor on /dev/ttyUSB0 115200 ---[0m
+[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H ---[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x400857ce: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:615
+[0m
+[0;33m0x400856c7: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:213
+[0m
+[0;33m0x4008263e: _xt_lowint1 at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/xtensa_vectors.S:1110
+[0m
+[0;33m0x400857cb: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:614
+[0m
+[0;33m0x400856c4: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:212
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x400857ce: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:615
+[0m
+[0;33m0x400856c7: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:213
+[0m
+[0;33m0x4008263e: _xt_lowint1 at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/xtensa_vectors.S:1110
+[0m
+[0;33m0x400857cb: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:614
+[0m
+[0;33m0x400856c4: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:212
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x400857ce: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:615
+[0m
+[0;33m0x400856c7: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:213
+[0m
+[0;33m0x4008263e: _xt_lowint1 at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/xtensa_vectors.S:1110
+[0m
+[0;33m0x400857cb: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:614
+[0m
+[0;33m0x400856c4: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:212
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x400857ce: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:615
+[0m
+[0;33m0x400856c7: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:213
+[0m
+[0;33m0x4008263e: _xt_lowint1 at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/xtensa_vectors.S:1110
+[0m
+[0;33m0x400857cb: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:614
+[0m
+[0;33m0x400856c4: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:212
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x400857ce: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:615
+[0m
+[0;33m0x400856c7: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:213
+[0m
+[0;33m0x4008263e: _xt_lowint1 at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/xtensa_vectors.S:1110
+[0m
+[0;33m0x400857cb: vPortYieldFromInt at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:614
+[0m
+[0;33m0x400856c4: _frxt_int_exit at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/portasm.S:212
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x4008106c: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0m
