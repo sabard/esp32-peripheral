@@ -1,0 +1,71 @@
+[0;33m--- idf_monitor on /dev/ttyUSB0 115200 ---[0m
+[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H ---[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x40081084: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x40081b02: panic_abort at /esp-idf/components/esp_system/panic.c:412
+[0m
+[0;33m0x40085635: esp_system_abort at /esp-idf/components/esp_system/esp_system.c:135
+[0m
+[0;33m0x4008a4f1: __assert_func at /esp-idf/components/newlib/assert.c:78
+[0m
+[0;33m0x400879d2: ulTaskGenericNotifyTake at /esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c:5572 (discriminator 1)
+[0m
+[0;33m0x400d52c5: vTaskBlink at /root/code/esp32/projects/sample_project/main/main.c:42
+[0m
+[0;33m0x40087ee1: vPortTaskWrapper at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:151
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x40081084: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x40081b02: panic_abort at /esp-idf/components/esp_system/panic.c:412
+[0m
+[0;33m0x40085635: esp_system_abort at /esp-idf/components/esp_system/esp_system.c:135
+[0m
+[0;33m0x4008a4f1: __assert_func at /esp-idf/components/newlib/assert.c:78
+[0m
+[0;33m0x400879d2: ulTaskGenericNotifyTake at /esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c:5572 (discriminator 1)
+[0m
+[0;33m0x400d52c5: vTaskBlink at /root/code/esp32/projects/sample_project/main/main.c:42
+[0m
+[0;33m0x40087ee1: vPortTaskWrapper at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:151
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x40081084: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x40081b02: panic_abort at /esp-idf/components/esp_system/panic.c:412
+[0m
+[0;33m0x40085635: esp_system_abort at /esp-idf/components/esp_system/esp_system.c:135
+[0m
+[0;33m0x4008a4f1: __assert_func at /esp-idf/components/newlib/assert.c:78
+[0m
+[0;33m0x400879d2: ulTaskGenericNotifyTake at /esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c:5572 (discriminator 1)
+[0m
+[0;33m0x400d52c5: vTaskBlink at /root/code/esp32/projects/sample_project/main/main.c:42
+[0m
+[0;33m0x40087ee1: vPortTaskWrapper at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:151
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x40081084: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0;33m0x40081b02: panic_abort at /esp-idf/components/esp_system/panic.c:412
+[0m
+[0;33m0x40085635: esp_system_abort at /esp-idf/components/esp_system/esp_system.c:135
+[0m
+[0;33m0x4008a4f1: __assert_func at /esp-idf/components/newlib/assert.c:78
+[0m
+[0;33m0x400879d2: ulTaskGenericNotifyTake at /esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c:5572 (discriminator 1)
+[0m
+[0;33m0x400d52c5: vTaskBlink at /root/code/esp32/projects/sample_project/main/main.c:42
+[0m
+[0;33m0x40087ee1: vPortTaskWrapper at /esp-idf/components/freertos/FreeRTOS-Kernel/portable/xtensa/port.c:151
+[0m
+[0;33m0x40080400: _init at ??:?
+[0m
+[0;33m0x40081084: call_start_cpu1 at /esp-idf/components/esp_system/port/cpu_start.c:142
+[0m
+[0m
