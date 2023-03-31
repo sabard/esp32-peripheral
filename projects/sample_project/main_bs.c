@@ -15,7 +15,7 @@ int number;
 static uint8_t s_led_state=0;
 SemaphoreHandle_t xSemaphore = NULL;
 
-vid vTaskWatch( void *pvParameters )
+void vTaskWatch( void *pvParameters )
 {
 	for ( ;; )
 	{
