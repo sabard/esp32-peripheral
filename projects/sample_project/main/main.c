@@ -28,7 +28,9 @@
 #include <lwip/netdb.h>
 
 #define PORT CONFIG_EXAMPLE_PORT
-#define BLINK_GPIO 20
+#define EXAMPLE_STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
+#define EXAMPLE_STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
+#define GPIO_JUICE  CONFIG_GPIO_JUICE
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY+5)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
 
@@ -83,6 +85,23 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
 //    ESP_LOGI(TAG, "~~~~~~~~~~~");
 //}
 
+static void example_set_static_ip(esp_netif_t *netif)
+{
+    if (esp_netif_dhcpc_stop(netif) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop dhcp client");
+        return;
+    }
+    esp_netif_ip_info_t ip;
+    memset(&ip, 0 , sizeof(esp_netif_ip_info_t));
+    ip.ip.addr = ipaddr_addr(EXAMPLE_STATIC_IP_ADDR);
+    ip.netmask.addr = ipaddr_addr(EXAMPLE_STATIC_NETMASK_ADDR);
+    if (esp_netif_set_ip_info(netif, &ip) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set ip info");
+        return;
+    }
+    ESP_LOGD(TAG, "Success to set static ip: %s, netmask: %s", EXAMPLE_STATIC_IP_ADDR, EXAMPLE_STATIC_NETMASK_ADDR);
+}
+
 
 /** setting PHY config and connections and installing ethernet driver and connecting to tcp/ip stack  */
 static void init_wesp32_eth()
@@ -121,7 +140,8 @@ static void init_wesp32_eth()
 	// Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
     //ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-
+	
+	example_set_static_ip(eth_netif);
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
@@ -208,7 +228,6 @@ static void udp_server_task(void *pvParameters)
 					xSemaphoreGive( xSemaphore );
 				}
    
-				//xSemaphoreGive( xSemaphore );
 
                 int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
                 if (err < 0) {
@@ -235,7 +254,7 @@ void vTaskBlink( void * pvParameters )
         if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
         {
             printf("LED SWITCH\n");
-            gpio_set_level(BLINK_GPIO, s_led_state);
+            gpio_set_level(GPIO_JUICE, s_led_state);
             s_led_state=!s_led_state;
 
         }
@@ -245,8 +264,8 @@ void vTaskBlink( void * pvParameters )
 
 static void configure_led(void)
 {
-      gpio_reset_pin(BLINK_GPIO);
-      gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+      gpio_reset_pin(GPIO_JUICE);
+      gpio_set_direction(GPIO_JUICE, GPIO_MODE_OUTPUT);
 }
 
 void app_main(void)
