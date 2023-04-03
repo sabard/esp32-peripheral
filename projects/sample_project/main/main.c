@@ -30,7 +30,7 @@
 #define PORT CONFIG_EXAMPLE_PORT
 #define EXAMPLE_STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
 #define EXAMPLE_STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
-#define GPIO_JUICE  CONFIG_GPIO_JUICE
+#define BLINK_GPIO  2
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY+5)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
 
@@ -254,7 +254,7 @@ void vTaskBlink( void * pvParameters )
         if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
         {
             printf("LED SWITCH\n");
-            gpio_set_level(GPIO_JUICE, s_led_state);
+            gpio_set_level(BLINK_GPIO, s_led_state);
             s_led_state=!s_led_state;
 
         }
@@ -264,8 +264,8 @@ void vTaskBlink( void * pvParameters )
 
 static void configure_led(void)
 {
-      gpio_reset_pin(GPIO_JUICE);
-      gpio_set_direction(GPIO_JUICE, GPIO_MODE_OUTPUT);
+      gpio_reset_pin(BLINK_GPIO);
+      gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 }
 
 void app_main(void)
