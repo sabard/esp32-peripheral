@@ -204,22 +204,26 @@ static void udp_server_task(void *pvParameters)
 
 
         while (1) {
+			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
+			ESP_LOGI(TAG, "debug5");
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-            // Error occurred during receiving
+            ESP_LOGI(TAG, "debug1");
+			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
+				ESP_LOGI(TAG, "debug2");	
                 // Get the sender's ip address as string
                 if (source_addr.ss_family == PF_INET) {
                     inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
                 } else if (source_addr.ss_family == PF_INET6) {
                     inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
                 }
-
+				ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);

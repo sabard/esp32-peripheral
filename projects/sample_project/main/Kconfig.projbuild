@@ -18,7 +18,7 @@ menu "Example Configuration"
 
 	config EXAMPLE_STATIC_IP_ADDR
         string "Static IP address"
-        default "192.168.52.50"
+        default "192.168.52.124"
         help
             Set static IP address.
 
