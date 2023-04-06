@@ -33,5 +33,19 @@ menu "Example Configuration"
         int "Juice Pin"
         default 14
         help
-            Local port the example server will listen on.
+			Pin to control juicer.
+
+	config GPIO_LIGHT_ON
+        int "Light On Pin"
+        default 12
+        help
+			Pin to control when lights get turned on.
+
+	config GPIO_LIGHT_OFF
+        int "Light Off Pin"
+        default 15
+        help
+			Pin to control when lights get turned off.
+
+
 endmenu
