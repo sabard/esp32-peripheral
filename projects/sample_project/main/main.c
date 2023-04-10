@@ -295,7 +295,7 @@ void vTaskLight_off( void * pvParameters )
             printf("LIGHT OFF SWITCH\n");
             gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
             ESP_LOGI(TAG, "state light off: %d", state_light_off);
-            state_light_off=!state_light_off;
+			state_light_off=!state_light_off;
 
         }
     }

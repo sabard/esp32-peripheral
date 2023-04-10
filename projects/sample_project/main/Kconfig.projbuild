@@ -30,22 +30,22 @@ menu "Example Configuration"
 
 
 	config GPIO_JUICE
-        int "Juice Pin"
+        int "Juice GPIO"
         default 14
         help
-			Pin to control juicer.
+			GPIO number on wEsp32 to control juicer.
 
 	config GPIO_LIGHT_ON
-        int "Light On Pin"
-        default 12
+        int "Light On GPIO"
+        default 5
         help
-			Pin to control when lights get turned on.
+			GPIO number on wESP32 to control when lights get turned on.
 
 	config GPIO_LIGHT_OFF
-        int "Light Off Pin"
-        default 15
+        int "Light Off GPIO"
+        default 4
         help
-			Pin to control when lights get turned off.
+			GPIO number on wESP32 to control when lights get turned off.
 
 
 endmenu
