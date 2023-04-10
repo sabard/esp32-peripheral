@@ -221,15 +221,15 @@ static void udp_server_task(void *pvParameters)
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-                if (rx_buffer[0] == 'j') {
+                if (rx_buffer[0] == 'j') {  
 					xSemaphoreGive( xSemaphore_juice );
                     ESP_LOGI(TAG, "debug6");
 				}
-				if (rx_buffer[0] == 'l') {
+				if (rx_buffer[0] == 'l') {   
 					xSemaphoreGive( xSemaphore_light_on );
                     ESP_LOGI(TAG, "debug7");
 				}
-				if (rx_buffer[0] == 'o'){
+				if (rx_buffer[0] == 'o'){  
 					xSemaphoreGive( xSemaphore_light_off);
                     ESP_LOGI(TAG, "debug8");
 				}
