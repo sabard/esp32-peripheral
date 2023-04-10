@@ -30,8 +30,22 @@ menu "Example Configuration"
 
 
 	config GPIO_JUICE
-        int "Juice Pin"
+        int "Juice GPIO"
         default 14
         help
-            Local port the example server will listen on.
+			GPIO number on wEsp32 to control juicer.
+
+	config GPIO_LIGHT_ON
+        int "Light On GPIO"
+        default 5
+        help
+			GPIO number on wESP32 to control when lights get turned on.
+
+	config GPIO_LIGHT_OFF
+        int "Light Off GPIO"
+        default 4
+        help
+			GPIO number on wESP32 to control when lights get turned off.
+
+
 endmenu
