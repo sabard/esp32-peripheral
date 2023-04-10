@@ -1,13 +1,15 @@
 /* Ethernet Basic Example
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
+   Took parts of code from: 
+   expressif/esp32/examples/ethernet/basic/main/ethernet_example_main.c 
+   expressif/esp32/examples/protocols/sockets/udp_server/main/udp_server.c 
 
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+   from https://github.com/espressif
 
-/* Trying to toggle LED on/off with keyboard input 'c' through ethernet*/
+   This script programs esp32 to light up an LED based on signals coming from PC
+ */
+
+
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -26,17 +28,26 @@
 #include <lwip/netdb.h>
 
 #define PORT CONFIG_EXAMPLE_PORT
-#define BLINK_GPIO 2
-#define BLINK_PRIORITY  (tskIDLE_PRIORITY+5)
+#define EXAMPLE_STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
+#define EXAMPLE_STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
+#define JUICE_GPIO  CONFIG_GPIO_JUICE
+#define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
+#define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
+#define JUICE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
+#define LIGHT_ON_PRIORITY  (tskIDLE_PRIORITY+5)
+#define LIGHT_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
 
 
 static const char *TAG = "eth_example";
 char input;
 int number;
-static uint8_t s_led_state=0;
-SemaphoreHandle_t xSemaphore = NULL;
-
+static uint8_t state_juice=0;
+static uint8_t state_light_on=0;
+static uint8_t state_light_off=0;
+SemaphoreHandle_t xSemaphore_juice = NULL;
+SemaphoreHandle_t xSemaphore_light_on = NULL;
+SemaphoreHandle_t xSemaphore_light_off = NULL;
 
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -67,19 +78,22 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-/** Event handler for IP_EVENT_ETH_GOT_IP */
-static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
-                                 int32_t event_id, void *event_data)
-{
-    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-    const esp_netif_ip_info_t *ip_info = &event->ip_info;
 
-    ESP_LOGI(TAG, "Ethernet Got IP Address");
-    ESP_LOGI(TAG, "~~~~~~~~~~~");
-    ESP_LOGI(TAG, "ETHIP:" IPSTR, IP2STR(&ip_info->ip));
-    ESP_LOGI(TAG, "ETHMASK:" IPSTR, IP2STR(&ip_info->netmask));
-    ESP_LOGI(TAG, "ETHGW:" IPSTR, IP2STR(&ip_info->gw));
-    ESP_LOGI(TAG, "~~~~~~~~~~~");
+static void example_set_static_ip(esp_netif_t *netif)
+{
+    if (esp_netif_dhcpc_stop(netif) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop dhcp client");
+        return;
+    }
+    esp_netif_ip_info_t ip;
+    memset(&ip, 0 , sizeof(esp_netif_ip_info_t));
+    ip.ip.addr = ipaddr_addr(EXAMPLE_STATIC_IP_ADDR);
+    ip.netmask.addr = ipaddr_addr(EXAMPLE_STATIC_NETMASK_ADDR);
+    if (esp_netif_set_ip_info(netif, &ip) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set ip info");
+        return;
+    }
+    ESP_LOGD(TAG, "Success to set static ip: %s, netmask: %s", EXAMPLE_STATIC_IP_ADDR, EXAMPLE_STATIC_NETMASK_ADDR);
 }
 
 
@@ -99,7 +113,6 @@ static void init_wesp32_eth()
  	phy_config.reset_gpio_num = -1;
 	esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
 
-	// Connecting ethernet driver to TCP/IP stack 
 	// Initialize TCP/IP network interface (should be called only once in application)
 	ESP_ERROR_CHECK(esp_netif_init());
     // Create default event loop that running in background
@@ -120,8 +133,9 @@ static void init_wesp32_eth()
     
 	// Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-
+    //ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+	
+	example_set_static_ip(eth_netif);
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
@@ -129,7 +143,7 @@ static void init_wesp32_eth()
 
 static void udp_server_task(void *pvParameters)
 {
-    char rx_buffer[128];
+    char rx_buffer[1500];
     char addr_str[128];
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
@@ -184,26 +198,41 @@ static void udp_server_task(void *pvParameters)
 
 
         while (1) {
+			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
+			ESP_LOGI(TAG, "debug5");
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-            // Error occurred during receiving
+			ESP_LOGI(TAG, "debug1");
+			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
+				ESP_LOGI(TAG, "debug2");	
                 // Get the sender's ip address as string
                 if (source_addr.ss_family == PF_INET) {
                     inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
                 } else if (source_addr.ss_family == PF_INET6) {
                     inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
                 }
-
+				ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
-                ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
+				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-				xSemaphoreGive( xSemaphore );
+                if (rx_buffer[0] == 'j') {  
+					xSemaphoreGive( xSemaphore_juice );
+                    ESP_LOGI(TAG, "debug6");
+				}
+				if (rx_buffer[0] == 'l') {   
+					xSemaphoreGive( xSemaphore_light_on );
+                    ESP_LOGI(TAG, "debug7");
+				}
+				if (rx_buffer[0] == 'o'){  
+					xSemaphoreGive( xSemaphore_light_off);
+                    ESP_LOGI(TAG, "debug8");
+				}
    
 
                 int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
@@ -224,26 +253,65 @@ static void udp_server_task(void *pvParameters)
 }
 
 
-void vTaskBlink( void * pvParameters )
+void vTaskJuice( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_juice, portMAX_DELAY) == pdTRUE )
         {
-            printf("LED SWITCH\n");
-            gpio_set_level(BLINK_GPIO, s_led_state);
-            s_led_state=!s_led_state;
+            printf("JUICE SWITCH\n");
+            gpio_set_level(JUICE_GPIO, state_juice);
+            ESP_LOGI(TAG, "state juice: %d", state_juice);
+            state_juice=!state_juice;
 
         }
-        printf("end of loop -- blink\n");
     }
 
 }
 
+void vTaskLight_on( void * pvParameters )
+{
+    for ( ;; )
+    {
+        if ( xSemaphoreTake( xSemaphore_light_on, portMAX_DELAY) == pdTRUE )
+        {
+            printf("LIGHT ON SWITCH\n");
+            gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            ESP_LOGI(TAG, "state light on: %d", state_light_on);
+            state_light_on=!state_light_on;
+
+        }
+    }
+
+}
+
+
+void vTaskLight_off( void * pvParameters )
+{
+    for ( ;; )
+    {
+        if ( xSemaphoreTake( xSemaphore_light_off, portMAX_DELAY) == pdTRUE )
+        {
+            printf("LIGHT OFF SWITCH\n");
+            gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			state_light_off=!state_light_off;
+
+        }
+    }
+
+}
+
+
 static void configure_led(void)
 {
-      gpio_reset_pin(BLINK_GPIO);
-      gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+      gpio_reset_pin(JUICE_GPIO);
+      gpio_set_direction(JUICE_GPIO, GPIO_MODE_OUTPUT);
+      gpio_reset_pin(LIGHT_ON_GPIO);
+      gpio_set_direction(LIGHT_ON_GPIO, GPIO_MODE_OUTPUT);
+      gpio_reset_pin(LIGHT_OFF_GPIO);
+      gpio_set_direction(LIGHT_OFF_GPIO, GPIO_MODE_OUTPUT);
+
 }
 
 void app_main(void)
@@ -259,13 +327,16 @@ void app_main(void)
 	configure_led();
 
     // creating semaphore
-    xSemaphore = xSemaphoreCreateBinary();
+    xSemaphore_juice = xSemaphoreCreateBinary();
+	xSemaphore_light_on = xSemaphoreCreateBinary();
+	xSemaphore_light_off = xSemaphoreCreateBinary();
 
-    if (xSemaphore !=NULL)
+
+    if (xSemaphore_juice !=NULL)
     {
         // creating tasks and their handles  
-		TaskHandle_t xTaskBlink = NULL;
-		xTaskCreate(vTaskBlink, "BLINK", 4096, NULL , BLINK_PRIORITY , &xTaskBlink);
+		TaskHandle_t xTaskJuice = NULL;
+		xTaskCreate(vTaskJuice, "JUICE", 4096, NULL , JUICE_PRIORITY , &xTaskJuice);
 
     }
     else
@@ -273,4 +344,28 @@ void app_main(void)
         printf("semaphore did not create sucessfully\n");
     
 	}
+    if (xSemaphore_light_on !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskLight_on = NULL;
+		xTaskCreate(vTaskLight_on, "LIGHT_ON", 4096, NULL , LIGHT_ON_PRIORITY , &xTaskLight_on);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+    
+	}
+    if (xSemaphore_light_off !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskLight_off = NULL;
+		xTaskCreate(vTaskLight_off, "LIGHT_OFF", 4096, NULL , LIGHT_OFF_PRIORITY , &xTaskLight_off);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+    
+	}
+
+
 }

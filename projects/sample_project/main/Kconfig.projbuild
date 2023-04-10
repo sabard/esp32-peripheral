@@ -16,4 +16,36 @@ menu "Example Configuration"
         help
             Local port the example server will listen on.
 
+	config EXAMPLE_STATIC_IP_ADDR
+        string "Static IP address"
+        default "192.168.52.124"
+        help
+            Set static IP address.
+
+    config EXAMPLE_STATIC_NETMASK_ADDR
+        string "Static netmask address"
+        default "255.255.255.0"
+        help
+            Set static netmask address.
+
+
+	config GPIO_JUICE
+        int "Juice GPIO"
+        default 14
+        help
+			GPIO number on wEsp32 to control juicer.
+
+	config GPIO_LIGHT_ON
+        int "Light On GPIO"
+        default 5
+        help
+			GPIO number on wESP32 to control when lights get turned on.
+
+	config GPIO_LIGHT_OFF
+        int "Light Off GPIO"
+        default 4
+        help
+			GPIO number on wESP32 to control when lights get turned off.
+
+
 endmenu
