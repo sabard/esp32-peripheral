@@ -223,12 +223,15 @@ static void udp_server_task(void *pvParameters)
                 ESP_LOGI(TAG, "%s", rx_buffer);
                 if (rx_buffer[0] == 'j') {
 					xSemaphoreGive( xSemaphore_juice );
+                    ESP_LOGI(TAG, "debug6");
 				}
 				if (rx_buffer[0] == 'l') {
 					xSemaphoreGive( xSemaphore_light_on );
+                    ESP_LOGI(TAG, "debug7");
 				}
 				if (rx_buffer[0] == 'o'){
 					xSemaphoreGive( xSemaphore_light_off);
+                    ESP_LOGI(TAG, "debug8");
 				}
    
 
@@ -258,6 +261,7 @@ void vTaskJuice( void * pvParameters )
         {
             printf("JUICE SWITCH\n");
             gpio_set_level(JUICE_GPIO, state_juice);
+            ESP_LOGI(TAG, "state juice: %d", state_juice);
             state_juice=!state_juice;
 
         }
@@ -273,6 +277,7 @@ void vTaskLight_on( void * pvParameters )
         {
             printf("LIGHT ON SWITCH\n");
             gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            ESP_LOGI(TAG, "state light on: %d", state_light_on);
             state_light_on=!state_light_on;
 
         }
@@ -289,6 +294,7 @@ void vTaskLight_off( void * pvParameters )
         {
             printf("LIGHT OFF SWITCH\n");
             gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            ESP_LOGI(TAG, "state light off: %d", state_light_off);
             state_light_off=!state_light_off;
 
         }
