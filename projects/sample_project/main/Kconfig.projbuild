@@ -47,5 +47,22 @@ menu "Example Configuration"
         help
 			GPIO number on wESP32 to control when lights get turned off.
 
+	config PULSE_LENGTH_MSEC
+        int "Pulse length in miliseconds"
+        default 1000
+        help
+			Length of the GPIO pulse in miliseconds
+
+	config TIMEOUT_SOCKET_SEC
+        int "Timeout of the socket in seconds"
+        default 300
+        help
+			Length of the timeout of the socket in seconds before socket restarts
+
+	config TIMEOUT_SOCKET_USEC
+        int "Timeout of the socket in microseconds"
+        default 0
+        help
+			Length of the timeout of the socket in microseconds
 
 endmenu

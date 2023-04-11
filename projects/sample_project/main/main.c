@@ -37,6 +37,10 @@
 #define TOGGLE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
+#define PULSE_PRIORITY  (tskIDLE_PRIORITY+5)
+#define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
+#define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
+#define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 
 
 static const char *TAG = "eth_example";
@@ -48,7 +52,9 @@ static uint8_t state_light_off=0;
 SemaphoreHandle_t xSemaphore_toggle = NULL;
 SemaphoreHandle_t xSemaphore_force_on = NULL;
 SemaphoreHandle_t xSemaphore_force_off = NULL;
+SemaphoreHandle_t xSemaphore_pulse = NULL;
 static int pin_char;
+const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
 
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -184,8 +190,8 @@ static void udp_server_task(void *pvParameters)
 #endif
         // Set timeout
         struct timeval timeout;
-        timeout.tv_sec = 60;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = TIMEOUT_SOCKET_SEC;
+        timeout.tv_usec = TIMEOUT_SOCKET_USEC;
         setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
         int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
@@ -233,6 +239,10 @@ static void udp_server_task(void *pvParameters)
 				if (rx_buffer[0] == 'g'){ // force off
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_force_off );
+				}
+				if (rx_buffer[0] == 'p'){ // pulse
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_pulse );
 				}
 
 
@@ -352,6 +362,62 @@ void vTaskForceOff( void * pvParameters )
 }
 
 
+void vTaskPulse( void * pvParameters )
+{
+    for ( ;; )
+    {
+        if ( xSemaphoreTake( xSemaphore_pulse, portMAX_DELAY) == pdTRUE )
+        {
+			if (pin_char == 'j'){
+            	printf("PULSE JUICE\n");
+            	if (state_juice==0) {
+					state_juice=1;
+            		ESP_LOGI(TAG, "state juice: %d", state_juice);
+					gpio_set_level(JUICE_GPIO, state_juice);
+					vTaskDelay(xDelay);
+					state_juice=0;
+					gpio_set_level(JUICE_GPIO, state_juice);
+            		ESP_LOGI(TAG, "state juice: %d", state_juice);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+			if (pin_char == 'l'){
+            	printf("PULSE LIGHT ON\n");
+            	if (state_light_on==0) {
+					state_light_on=1;
+            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
+					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+					vTaskDelay(xDelay);
+					state_light_on=0;
+					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+			if (pin_char == 'o'){
+            	printf("PULSE LIGHT OFF\n");
+            	if (state_light_off==0) {
+					state_light_off=1;
+            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
+					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+					vTaskDelay(xDelay);
+					state_light_off=0;
+					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+
+
+        }
+    }
+
+}
+
+
 static void configure_led(void)
 {
       gpio_reset_pin(JUICE_GPIO);
@@ -379,7 +445,7 @@ void app_main(void)
 	xSemaphore_toggle = xSemaphoreCreateBinary();
 	xSemaphore_force_on = xSemaphoreCreateBinary();
 	xSemaphore_force_off = xSemaphoreCreateBinary();
-	
+	xSemaphore_pulse = xSemaphoreCreateBinary();
 
 	if (xSemaphore_toggle !=NULL)
     {
@@ -410,6 +476,17 @@ void app_main(void)
         // creating tasks and their handles  
 		TaskHandle_t xTaskForceOff = NULL;
 		xTaskCreate(vTaskForceOff, "FORCE OFF", 4096, NULL , FORCE_OFF_PRIORITY , &xTaskForceOff);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+
+	if (xSemaphore_pulse !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskPulse = NULL;
+		xTaskCreate(vTaskPulse, "PULSE", 4096, NULL , PULSE_PRIORITY , &xTaskPulse);
     }
     else
     {
