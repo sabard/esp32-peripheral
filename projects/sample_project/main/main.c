@@ -33,10 +33,10 @@
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
-#define JUICE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
-#define LIGHT_ON_PRIORITY  (tskIDLE_PRIORITY+5)
-#define LIGHT_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
+#define TOGGLE_PRIORITY  (tskIDLE_PRIORITY+5)
+#define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
+#define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
 
 
 static const char *TAG = "eth_example";
@@ -45,9 +45,10 @@ int number;
 static uint8_t state_juice=0;
 static uint8_t state_light_on=0;
 static uint8_t state_light_off=0;
-SemaphoreHandle_t xSemaphore_juice = NULL;
-SemaphoreHandle_t xSemaphore_light_on = NULL;
-SemaphoreHandle_t xSemaphore_light_off = NULL;
+SemaphoreHandle_t xSemaphore_toggle = NULL;
+SemaphoreHandle_t xSemaphore_force_on = NULL;
+SemaphoreHandle_t xSemaphore_force_off = NULL;
+static int pin_char;
 
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -221,18 +222,20 @@ static void udp_server_task(void *pvParameters)
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-                if (rx_buffer[0] == 'j') {  
-					xSemaphoreGive( xSemaphore_juice );
-                    ESP_LOGI(TAG, "debug6");
+				if (rx_buffer[0] == 't'){ // toggle
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_toggle );
 				}
-				if (rx_buffer[0] == 'l') {   
-					xSemaphoreGive( xSemaphore_light_on );
-                    ESP_LOGI(TAG, "debug7");
+				if (rx_buffer[0] == 'f'){ // force on
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_force_on );
 				}
-				if (rx_buffer[0] == 'o'){  
-					xSemaphoreGive( xSemaphore_light_off);
-                    ESP_LOGI(TAG, "debug8");
+				if (rx_buffer[0] == 'g'){ // force off
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_force_off );
 				}
+
+
    
 
                 int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
@@ -253,32 +256,64 @@ static void udp_server_task(void *pvParameters)
 }
 
 
-void vTaskJuice( void * pvParameters )
+void vTaskToggle( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_juice, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_toggle, portMAX_DELAY) == pdTRUE )
         {
-            printf("JUICE SWITCH\n");
-            gpio_set_level(JUICE_GPIO, state_juice);
-            ESP_LOGI(TAG, "state juice: %d", state_juice);
-            state_juice=!state_juice;
+			if (pin_char == 'j'){
+
+            	printf("TOGGLE JUICE\n");
+            	state_juice=!state_juice; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+
+            	printf("TOGGLE LIGHT ON\n");
+            	state_light_on=!state_light_on;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+
+            	printf("TOGGLE LIGHT OFF\n");
+            	state_light_off=!state_light_off;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
 
 }
 
-void vTaskLight_on( void * pvParameters )
+
+void vTaskForceOn( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_light_on, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_force_on, portMAX_DELAY) == pdTRUE )
         {
-            printf("LIGHT ON SWITCH\n");
-            gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            ESP_LOGI(TAG, "state light on: %d", state_light_on);
-            state_light_on=!state_light_on;
+			if (pin_char == 'j'){
+            	printf("FORCE ON JUICE\n");
+            	state_juice=1; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+            	printf("FORCE ON LIGHT ON\n");
+            	state_light_on=1;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+            	printf("FORCE ON LIGHT OFF\n");
+            	state_light_off=1;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
@@ -286,16 +321,30 @@ void vTaskLight_on( void * pvParameters )
 }
 
 
-void vTaskLight_off( void * pvParameters )
+void vTaskForceOff( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_light_off, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_force_off, portMAX_DELAY) == pdTRUE )
         {
-            printf("LIGHT OFF SWITCH\n");
-            gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            ESP_LOGI(TAG, "state light off: %d", state_light_off);
-			state_light_off=!state_light_off;
+			if (pin_char == 'j'){
+            	printf("FORCE OFF JUICE\n");
+            	state_juice=0; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+            	printf("FORCE OFF LIGHT ON\n");
+            	state_light_on=0;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+            	printf("FORCE OFF LIGHT OFF\n");
+            	state_light_off=0;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
@@ -327,45 +376,44 @@ void app_main(void)
 	configure_led();
 
     // creating semaphore
-    xSemaphore_juice = xSemaphoreCreateBinary();
-	xSemaphore_light_on = xSemaphoreCreateBinary();
-	xSemaphore_light_off = xSemaphoreCreateBinary();
+	xSemaphore_toggle = xSemaphoreCreateBinary();
+	xSemaphore_force_on = xSemaphoreCreateBinary();
+	xSemaphore_force_off = xSemaphoreCreateBinary();
+	
 
-
-    if (xSemaphore_juice !=NULL)
+	if (xSemaphore_toggle !=NULL)
     {
         // creating tasks and their handles  
-		TaskHandle_t xTaskJuice = NULL;
-		xTaskCreate(vTaskJuice, "JUICE", 4096, NULL , JUICE_PRIORITY , &xTaskJuice);
+		TaskHandle_t xTaskToggle = NULL;
+		xTaskCreate(vTaskToggle, "TOGGLE", 4096, NULL , TOGGLE_PRIORITY , &xTaskToggle);
 
     }
     else
     {
         printf("semaphore did not create sucessfully\n");
-    
-	}
-    if (xSemaphore_light_on !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskLight_on = NULL;
-		xTaskCreate(vTaskLight_on, "LIGHT_ON", 4096, NULL , LIGHT_ON_PRIORITY , &xTaskLight_on);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-    
-	}
-    if (xSemaphore_light_off !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskLight_off = NULL;
-		xTaskCreate(vTaskLight_off, "LIGHT_OFF", 4096, NULL , LIGHT_OFF_PRIORITY , &xTaskLight_off);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-    
 	}
 
+	if (xSemaphore_force_on !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskForceOn = NULL;
+		xTaskCreate(vTaskForceOn, "FORCE ON", 4096, NULL , FORCE_ON_PRIORITY , &xTaskForceOn);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+
+
+	if (xSemaphore_force_off !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskForceOff = NULL;
+		xTaskCreate(vTaskForceOff, "FORCE OFF", 4096, NULL , FORCE_OFF_PRIORITY , &xTaskForceOff);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
 
 }
