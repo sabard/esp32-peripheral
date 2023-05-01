@@ -163,21 +163,8 @@ static void udp_server_task(void *pvParameters)
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     struct sockaddr_in6 dest_addr;
-    //struct sockaddr_in dest_addr;
 
     while (1) {
-//        struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
-//        dest_addr_ip4->sin_addr.s_addr = inet_addr(HOST_IP_ADDR);  // only have wesp listen to lico ip 
-//        dest_addr_ip4->sin_family = AF_INET;
-//        dest_addr_ip4->sin_port = htons(PORT);
-//        ip_protocol = IPPROTO_IP;
-//
-//        sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
-//        if (sock < 0) {
-//            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-//            break;
-//        }
-//        ESP_LOGI(TAG, "Socket created");
 
         if (addr_family == AF_INET) {
             struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
@@ -229,7 +216,6 @@ static void udp_server_task(void *pvParameters)
 			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
 			ESP_LOGI(TAG, "debug5");
-//            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
 #if defined(CONFIG_LWIP_NETBUF_RECVINFO) && !defined(CONFIG_EXAMPLE_IPV6)
             int len = recvmsg(sock, &msg, 0);
 #else
@@ -246,11 +232,6 @@ static void udp_server_task(void *pvParameters)
 				ESP_LOGI(TAG, "debug2");	
                 // Get the sender's ip address as string
                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-//                if (source_addr.ss_family == PF_INET) {
-//                    inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-//                } else if (source_addr.ss_family == PF_INET6) {
-//                    inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
-//                }
 
 
                 ESP_LOGI(TAG, "debug3");
