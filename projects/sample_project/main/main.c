@@ -56,6 +56,13 @@ SemaphoreHandle_t xSemaphore_pulse = NULL;
 static int pin_char;
 const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
 
+
+// make inter-function socket variables to be accessed by both udp server and client functions
+static int sock;
+SemaphoreHandle_t xSemaphore_send = NULL;
+#define HOST_IP_ADDR "192.168.98.44"
+static const char *payload = "Message from ESP32 ";
+
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data)
@@ -140,13 +147,14 @@ static void init_wesp32_eth()
     
 	// Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
-    //ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-	
+
+    // Set a static ip address for wesp32
 	example_set_static_ip(eth_netif);
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
 }
+
 
 static void udp_server_task(void *pvParameters)
 {
@@ -155,8 +163,21 @@ static void udp_server_task(void *pvParameters)
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     struct sockaddr_in6 dest_addr;
+    //struct sockaddr_in dest_addr;
 
     while (1) {
+//        struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
+//        dest_addr_ip4->sin_addr.s_addr = inet_addr(HOST_IP_ADDR);  // only have wesp listen to lico ip 
+//        dest_addr_ip4->sin_family = AF_INET;
+//        dest_addr_ip4->sin_port = htons(PORT);
+//        ip_protocol = IPPROTO_IP;
+//
+//        sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+//        if (sock < 0) {
+//            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+//            break;
+//        }
+//        ESP_LOGI(TAG, "Socket created");
 
         if (addr_family == AF_INET) {
             struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
@@ -171,13 +192,12 @@ static void udp_server_task(void *pvParameters)
             ip_protocol = IPPROTO_IPV6;
         }
 
-        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
         ESP_LOGI(TAG, "Socket created");
-
 
 #if defined(CONFIG_EXAMPLE_IPV4) && defined(CONFIG_EXAMPLE_IPV6)
         if (addr_family == AF_INET6) {
@@ -188,6 +208,7 @@ static void udp_server_task(void *pvParameters)
             setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
         }
 #endif
+
         // Set timeout
         struct timeval timeout;
         timeout.tv_sec = TIMEOUT_SOCKET_SEC;
@@ -208,8 +229,13 @@ static void udp_server_task(void *pvParameters)
 			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
 			ESP_LOGI(TAG, "debug5");
+//            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+#if defined(CONFIG_LWIP_NETBUF_RECVINFO) && !defined(CONFIG_EXAMPLE_IPV6)
+            int len = recvmsg(sock, &msg, 0);
+#else
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-			ESP_LOGI(TAG, "debug1");
+#endif
+            ESP_LOGI(TAG, "debug1");
 			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
@@ -219,12 +245,15 @@ static void udp_server_task(void *pvParameters)
             else {
 				ESP_LOGI(TAG, "debug2");	
                 // Get the sender's ip address as string
-                if (source_addr.ss_family == PF_INET) {
-                    inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-                } else if (source_addr.ss_family == PF_INET6) {
-                    inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
-                }
-				ESP_LOGI(TAG, "debug3");
+                inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+//                if (source_addr.ss_family == PF_INET) {
+//                    inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+//                } else if (source_addr.ss_family == PF_INET6) {
+//                    inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
+//                }
+
+
+                ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
@@ -244,14 +273,8 @@ static void udp_server_task(void *pvParameters)
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_pulse );
 				}
+ 
 
-
-   
-
-                int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
-                if (err < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                    break;
                 }
             }
         }
@@ -261,7 +284,7 @@ static void udp_server_task(void *pvParameters)
             shutdown(sock, 0);
             close(sock);
         }
-    }
+   
     vTaskDelete(NULL);
 }
 
@@ -418,6 +441,47 @@ void vTaskPulse( void * pvParameters )
 }
 
 
+void vTaskWatch( void *pvParameters )
+{
+	for ( ;; )
+	{
+		input = getchar();
+		if (input == 'c')
+		{
+			xSemaphoreGive( xSemaphore_send );
+		}
+		vTaskDelay( 100 / portTICK_PERIOD_MS );
+	}
+
+}
+
+void vTaskSend( void * pvParameters )
+{
+    printf("debug19");
+	for ( ;; )
+	{
+		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
+		{
+            printf("debug20");
+            struct sockaddr_in dest_addr;
+            dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+            dest_addr.sin_family = AF_INET;
+            dest_addr.sin_port = htons(PORT);
+            printf("debug21");
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            printf("debug22");
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                break;
+            }
+            printf("debug23");
+            ESP_LOGI(TAG, "Message sent");	
+		}
+		printf("end of loop -- send\n");
+	}
+	
+}
+
 static void configure_led(void)
 {
       gpio_reset_pin(JUICE_GPIO);
@@ -432,12 +496,8 @@ static void configure_led(void)
 void app_main(void)
 {
 	init_wesp32_eth();
-#ifdef CONFIG_EXAMPLE_IPV4
-	xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
-#endif
-#ifdef CONFIG_EXAMPLE_IPV6
-	xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET6, WATCH_PRIORITY, NULL);
-#endif
+	
+    xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
 
 	configure_led();
 
@@ -446,6 +506,8 @@ void app_main(void)
 	xSemaphore_force_on = xSemaphoreCreateBinary();
 	xSemaphore_force_off = xSemaphoreCreateBinary();
 	xSemaphore_pulse = xSemaphoreCreateBinary();
+	xSemaphore_send = xSemaphoreCreateBinary();
+    
 
 	if (xSemaphore_toggle !=NULL)
     {
@@ -487,6 +549,18 @@ void app_main(void)
         // creating tasks and their handles  
 		TaskHandle_t xTaskPulse = NULL;
 		xTaskCreate(vTaskPulse, "PULSE", 4096, NULL , PULSE_PRIORITY , &xTaskPulse);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+	if (xSemaphore_send !=NULL)
+    {
+        // creating tasks and their handles  
+        TaskHandle_t xTaskWatch = NULL;
+        TaskHandle_t xTaskSend = NULL;
+		xTaskCreate(vTaskWatch, "WATCH", 4096, NULL , WATCH_PRIORITY , &xTaskWatch);
+		xTaskCreate(vTaskSend, "SEND", 4096, NULL , PULSE_PRIORITY , &xTaskSend);
     }
     else
     {
