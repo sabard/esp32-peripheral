@@ -1,12 +1,18 @@
 /* Ethernet Basic Example
 
    Took parts of code from: 
-   expressif/esp32/examples/ethernet/basic/main/ethernet_example_main.c 
-   expressif/esp32/examples/protocols/sockets/udp_server/main/udp_server.c 
+   expressif/esp-idf/examples/ethernet/basic/main/ethernet_example_main.c 
+   expressif/esp-idf/examples/protocols/sockets/udp_server/main/udp_server.c 
+   expressif/esp-idf/examples/protocols/sockets/udp_client/main/udp_client.c 
 
    from https://github.com/espressif
 
-   This script programs esp32 to light up an LED based on signals coming from PC
+   This script programs wEsp32 to set up a UDP client and server to communicate with a host computer. 
+   You can control when wEsp32 triggers a UDP client task to send a packet to host computer by pressing 'c' on the keyboad
+   wESP32 is also simultaneously listening for any packets with UDP server so you can send packets to wESP32 from host computer. 
+
+    This program also has specific tasks that does specific actions on particular GPIO pins based on what the UDP packet string message is. -- This will be discontinued. Instead, rather than the host computer sending UDP string messages, it will send out a dictionary with various configurations for GPIO actions specified in the dict itself (i.e. what GPIO pin, what action -- toggle on/off, force on, force off, pulse, duration etc)
+
  */
 
 
@@ -41,7 +47,7 @@
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
-
+#define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
 
 static const char *TAG = "eth_example";
 char input;
@@ -55,12 +61,8 @@ SemaphoreHandle_t xSemaphore_force_off = NULL;
 SemaphoreHandle_t xSemaphore_pulse = NULL;
 static int pin_char;
 const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
-
-
-// make inter-function socket variables to be accessed by both udp server and client functions
-static int sock;
+static int sock; // global socket variable to be accessed by both udp server and client functions 
 SemaphoreHandle_t xSemaphore_send = NULL;
-#define HOST_IP_ADDR "192.168.98.44"
 static const char *payload = "Message from ESP32 ";
 
 /** Event handler for Ethernet events */
@@ -92,7 +94,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-
+// setting up the static ip address for wESP32 for host computer and wESP32 to be on the same subnet
 static void example_set_static_ip(esp_netif_t *netif)
 {
     if (esp_netif_dhcpc_stop(netif) != ESP_OK) {
@@ -233,7 +235,6 @@ static void udp_server_task(void *pvParameters)
                 // Get the sender's ip address as string
                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
 
-
                 ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
@@ -256,9 +257,10 @@ static void udp_server_task(void *pvParameters)
 				}
  
 
-                }
             }
         }
+    }
+ 
 
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
@@ -436,6 +438,7 @@ void vTaskWatch( void *pvParameters )
 
 }
 
+// UDP client task function
 void vTaskSend( void * pvParameters )
 {
     printf("debug19");

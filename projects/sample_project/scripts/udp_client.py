@@ -1,9 +1,14 @@
 import argparse
 import os
 import socket
+import msgpack
 
 port = 3333
 wesp_ip_address = "192.168.98.124"
+payload = {
+        "key": 1,
+        "another_key":"another_value",
+        }
 
 # set up UDP server on lico
 def set_UDP_sock(address, port):
@@ -24,30 +29,33 @@ def set_UDP_sock(address, port):
 
 
 def send_UDP_packet(sock, addr, payload):
-		try:
-				sock.sendto(payload.encode(), addr)
-		except socket.timeout:
-				print('Socket operation timeout')
-				return ''
-		except socket.error as msg:
-				print('Error while sending or receiving data from the socket')
-				print(os.strerror(msg.errno))
-				sock.close()
-				raise
-		return 1
+    # incorporate msg pack here 
+    packed = msgpack.packb(payload, use_bin_type=True)
+    try:
+        print(packed)
+        sock.sendto(packed, addr)
+    except socket.timeout:
+        print('Socket operation timeout')
+        return ''
+    except socket.error as msg:
+        print('Error while sending or receiving data from the socket')
+        print(os.strerror(msg.errno))
+        sock.close()
+        raise
+    return 1
 
 
 # send UDP packet based on some condition
 def main():
-		sock, addr = set_UDP_sock(wesp_ip_address, port)
-		while True:
-				key = input("Key input: ")
-				if key == "a":
-						send_UDP_packet(sock, addr, "Hello from PC")
-		return 0
+    sock, addr = set_UDP_sock(wesp_ip_address, port)
+    while True:
+        key = input("Key input: ")
+        if key == "a":
+            send_UDP_packet(sock, addr, payload)
+    return 0
 
 if __name__ == '__main__':
-	main()
+    main()
 
 
 			
