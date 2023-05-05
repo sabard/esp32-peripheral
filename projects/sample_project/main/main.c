@@ -1,12 +1,18 @@
 /* Ethernet Basic Example
 
    Took parts of code from: 
-   expressif/esp32/examples/ethernet/basic/main/ethernet_example_main.c 
-   expressif/esp32/examples/protocols/sockets/udp_server/main/udp_server.c 
+   expressif/esp-idf/examples/ethernet/basic/main/ethernet_example_main.c 
+   expressif/esp-idf/examples/protocols/sockets/udp_server/main/udp_server.c 
+   expressif/esp-idf/examples/protocols/sockets/udp_client/main/udp_client.c 
 
    from https://github.com/espressif
 
-   This script programs esp32 to light up an LED based on signals coming from PC
+   This script programs wEsp32 to set up a UDP client and server to communicate with a host computer. 
+   You can control when wEsp32 triggers a UDP client task to send a packet to host computer by pressing 'c' on the keyboad
+   wESP32 is also simultaneously listening for any packets with UDP server so you can send packets to wESP32 from host computer. 
+
+    This program also has specific tasks that does specific actions on particular GPIO pins based on what the UDP packet string message is. -- This will be discontinued. Instead, rather than the host computer sending UDP string messages, it will send out a dictionary with various configurations for GPIO actions specified in the dict itself (i.e. what GPIO pin, what action -- toggle on/off, force on, force off, pulse, duration etc)
+
  */
 
 
@@ -33,11 +39,15 @@
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
-#define JUICE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
-#define LIGHT_ON_PRIORITY  (tskIDLE_PRIORITY+5)
-#define LIGHT_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
-
+#define TOGGLE_PRIORITY  (tskIDLE_PRIORITY+5)
+#define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
+#define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
+#define PULSE_PRIORITY  (tskIDLE_PRIORITY+5)
+#define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
+#define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
+#define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
+#define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
 
 static const char *TAG = "eth_example";
 char input;
@@ -45,9 +55,15 @@ int number;
 static uint8_t state_juice=0;
 static uint8_t state_light_on=0;
 static uint8_t state_light_off=0;
-SemaphoreHandle_t xSemaphore_juice = NULL;
-SemaphoreHandle_t xSemaphore_light_on = NULL;
-SemaphoreHandle_t xSemaphore_light_off = NULL;
+SemaphoreHandle_t xSemaphore_toggle = NULL;
+SemaphoreHandle_t xSemaphore_force_on = NULL;
+SemaphoreHandle_t xSemaphore_force_off = NULL;
+SemaphoreHandle_t xSemaphore_pulse = NULL;
+static int pin_char;
+const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
+static int sock; // global socket variable to be accessed by both udp server and client functions 
+SemaphoreHandle_t xSemaphore_send = NULL;
+static const char *payload = "Message from ESP32 ";
 
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -78,7 +94,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-
+// setting up the static ip address for wESP32 for host computer and wESP32 to be on the same subnet
 static void example_set_static_ip(esp_netif_t *netif)
 {
     if (esp_netif_dhcpc_stop(netif) != ESP_OK) {
@@ -133,13 +149,14 @@ static void init_wesp32_eth()
     
 	// Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
-    //ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
-	
+
+    // Set a static ip address for wesp32
 	example_set_static_ip(eth_netif);
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
 }
+
 
 static void udp_server_task(void *pvParameters)
 {
@@ -164,13 +181,12 @@ static void udp_server_task(void *pvParameters)
             ip_protocol = IPPROTO_IPV6;
         }
 
-        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
         ESP_LOGI(TAG, "Socket created");
-
 
 #if defined(CONFIG_EXAMPLE_IPV4) && defined(CONFIG_EXAMPLE_IPV6)
         if (addr_family == AF_INET6) {
@@ -181,10 +197,11 @@ static void udp_server_task(void *pvParameters)
             setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
         }
 #endif
+
         // Set timeout
         struct timeval timeout;
-        timeout.tv_sec = 60;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = TIMEOUT_SOCKET_SEC;
+        timeout.tv_usec = TIMEOUT_SOCKET_USEC;
         setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
         int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
@@ -201,8 +218,12 @@ static void udp_server_task(void *pvParameters)
 			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
 			ESP_LOGI(TAG, "debug5");
+#if defined(CONFIG_LWIP_NETBUF_RECVINFO) && !defined(CONFIG_EXAMPLE_IPV6)
+            int len = recvmsg(sock, &msg, 0);
+#else
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-			ESP_LOGI(TAG, "debug1");
+#endif
+            ESP_LOGI(TAG, "debug1");
 			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
@@ -212,73 +233,103 @@ static void udp_server_task(void *pvParameters)
             else {
 				ESP_LOGI(TAG, "debug2");	
                 // Get the sender's ip address as string
-                if (source_addr.ss_family == PF_INET) {
-                    inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-                } else if (source_addr.ss_family == PF_INET6) {
-                    inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
-                }
-				ESP_LOGI(TAG, "debug3");
+                inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+
+                ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-                if (rx_buffer[0] == 'j') {  
-					xSemaphoreGive( xSemaphore_juice );
-                    ESP_LOGI(TAG, "debug6");
+				if (rx_buffer[0] == 't'){ // toggle
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_toggle );
 				}
-				if (rx_buffer[0] == 'l') {   
-					xSemaphoreGive( xSemaphore_light_on );
-                    ESP_LOGI(TAG, "debug7");
+				if (rx_buffer[0] == 'f'){ // force on
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_force_on );
 				}
-				if (rx_buffer[0] == 'o'){  
-					xSemaphoreGive( xSemaphore_light_off);
-                    ESP_LOGI(TAG, "debug8");
+				if (rx_buffer[0] == 'g'){ // force off
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_force_off );
 				}
-   
+				if (rx_buffer[0] == 'p'){ // pulse
+					pin_char = rx_buffer[1];
+					xSemaphoreGive( xSemaphore_pulse );
+				}
+ 
 
-                int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
-                if (err < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                    break;
-                }
             }
         }
+    }
+ 
 
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
-    }
+   
     vTaskDelete(NULL);
 }
 
 
-void vTaskJuice( void * pvParameters )
+void vTaskToggle( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_juice, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_toggle, portMAX_DELAY) == pdTRUE )
         {
-            printf("JUICE SWITCH\n");
-            gpio_set_level(JUICE_GPIO, state_juice);
-            ESP_LOGI(TAG, "state juice: %d", state_juice);
-            state_juice=!state_juice;
+			if (pin_char == 'j'){
+
+            	printf("TOGGLE JUICE\n");
+            	state_juice=!state_juice; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+
+            	printf("TOGGLE LIGHT ON\n");
+            	state_light_on=!state_light_on;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+
+            	printf("TOGGLE LIGHT OFF\n");
+            	state_light_off=!state_light_off;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
 
 }
 
-void vTaskLight_on( void * pvParameters )
+
+void vTaskForceOn( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_light_on, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_force_on, portMAX_DELAY) == pdTRUE )
         {
-            printf("LIGHT ON SWITCH\n");
-            gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            ESP_LOGI(TAG, "state light on: %d", state_light_on);
-            state_light_on=!state_light_on;
+			if (pin_char == 'j'){
+            	printf("FORCE ON JUICE\n");
+            	state_juice=1; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+            	printf("FORCE ON LIGHT ON\n");
+            	state_light_on=1;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+            	printf("FORCE ON LIGHT OFF\n");
+            	state_light_off=1;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
@@ -286,22 +337,134 @@ void vTaskLight_on( void * pvParameters )
 }
 
 
-void vTaskLight_off( void * pvParameters )
+void vTaskForceOff( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_light_off, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_force_off, portMAX_DELAY) == pdTRUE )
         {
-            printf("LIGHT OFF SWITCH\n");
-            gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            ESP_LOGI(TAG, "state light off: %d", state_light_off);
-			state_light_off=!state_light_off;
+			if (pin_char == 'j'){
+            	printf("FORCE OFF JUICE\n");
+            	state_juice=0; 
+				gpio_set_level(JUICE_GPIO, state_juice);
+            	ESP_LOGI(TAG, "state juice: %d", state_juice);
+			}
+			if (pin_char == 'l'){
+            	printf("FORCE OFF LIGHT ON\n");
+            	state_light_on=0;
+				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
+			}
+			if (pin_char == 'o'){
+            	printf("FORCE OFF LIGHT OFF\n");
+            	state_light_off=0;
+				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
+			}
 
         }
     }
 
 }
 
+
+void vTaskPulse( void * pvParameters )
+{
+    for ( ;; )
+    {
+        if ( xSemaphoreTake( xSemaphore_pulse, portMAX_DELAY) == pdTRUE )
+        {
+			if (pin_char == 'j'){
+            	printf("PULSE JUICE\n");
+            	if (state_juice==0) {
+					state_juice=1;
+            		ESP_LOGI(TAG, "state juice: %d", state_juice);
+					gpio_set_level(JUICE_GPIO, state_juice);
+					vTaskDelay(xDelay);
+					state_juice=0;
+					gpio_set_level(JUICE_GPIO, state_juice);
+            		ESP_LOGI(TAG, "state juice: %d", state_juice);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+			if (pin_char == 'l'){
+            	printf("PULSE LIGHT ON\n");
+            	if (state_light_on==0) {
+					state_light_on=1;
+            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
+					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+					vTaskDelay(xDelay);
+					state_light_on=0;
+					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
+            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+			if (pin_char == 'o'){
+            	printf("PULSE LIGHT OFF\n");
+            	if (state_light_off==0) {
+					state_light_off=1;
+            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
+					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+					vTaskDelay(xDelay);
+					state_light_off=0;
+					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
+            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
+				} else {
+						printf("Cannot pulse due to state not being at 0");
+				}
+			}
+
+
+        }
+    }
+
+}
+
+
+void vTaskWatch( void *pvParameters )
+{
+	for ( ;; )
+	{
+		input = getchar();
+		if (input == 'c')
+		{
+			xSemaphoreGive( xSemaphore_send );
+		}
+		vTaskDelay( 100 / portTICK_PERIOD_MS );
+	}
+
+}
+
+// UDP client task function
+void vTaskSend( void * pvParameters )
+{
+    printf("debug19");
+	for ( ;; )
+	{
+		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
+		{
+            printf("debug20");
+            struct sockaddr_in dest_addr;
+            dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+            dest_addr.sin_family = AF_INET;
+            dest_addr.sin_port = htons(PORT);
+            printf("debug21");
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            printf("debug22");
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                break;
+            }
+            printf("debug23");
+            ESP_LOGI(TAG, "Message sent");	
+		}
+		printf("end of loop -- send\n");
+	}
+	
+}
 
 static void configure_led(void)
 {
@@ -317,55 +480,75 @@ static void configure_led(void)
 void app_main(void)
 {
 	init_wesp32_eth();
-#ifdef CONFIG_EXAMPLE_IPV4
-	xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
-#endif
-#ifdef CONFIG_EXAMPLE_IPV6
-	xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET6, WATCH_PRIORITY, NULL);
-#endif
+	
+    xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
 
 	configure_led();
 
     // creating semaphore
-    xSemaphore_juice = xSemaphoreCreateBinary();
-	xSemaphore_light_on = xSemaphoreCreateBinary();
-	xSemaphore_light_off = xSemaphoreCreateBinary();
+	xSemaphore_toggle = xSemaphoreCreateBinary();
+	xSemaphore_force_on = xSemaphoreCreateBinary();
+	xSemaphore_force_off = xSemaphoreCreateBinary();
+	xSemaphore_pulse = xSemaphoreCreateBinary();
+	xSemaphore_send = xSemaphoreCreateBinary();
+    
 
-
-    if (xSemaphore_juice !=NULL)
+	if (xSemaphore_toggle !=NULL)
     {
         // creating tasks and their handles  
-		TaskHandle_t xTaskJuice = NULL;
-		xTaskCreate(vTaskJuice, "JUICE", 4096, NULL , JUICE_PRIORITY , &xTaskJuice);
+		TaskHandle_t xTaskToggle = NULL;
+		xTaskCreate(vTaskToggle, "TOGGLE", 4096, NULL , TOGGLE_PRIORITY , &xTaskToggle);
 
     }
     else
     {
         printf("semaphore did not create sucessfully\n");
-    
-	}
-    if (xSemaphore_light_on !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskLight_on = NULL;
-		xTaskCreate(vTaskLight_on, "LIGHT_ON", 4096, NULL , LIGHT_ON_PRIORITY , &xTaskLight_on);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-    
-	}
-    if (xSemaphore_light_off !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskLight_off = NULL;
-		xTaskCreate(vTaskLight_off, "LIGHT_OFF", 4096, NULL , LIGHT_OFF_PRIORITY , &xTaskLight_off);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-    
 	}
 
+	if (xSemaphore_force_on !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskForceOn = NULL;
+		xTaskCreate(vTaskForceOn, "FORCE ON", 4096, NULL , FORCE_ON_PRIORITY , &xTaskForceOn);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+
+
+	if (xSemaphore_force_off !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskForceOff = NULL;
+		xTaskCreate(vTaskForceOff, "FORCE OFF", 4096, NULL , FORCE_OFF_PRIORITY , &xTaskForceOff);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+
+	if (xSemaphore_pulse !=NULL)
+    {
+        // creating tasks and their handles  
+		TaskHandle_t xTaskPulse = NULL;
+		xTaskCreate(vTaskPulse, "PULSE", 4096, NULL , PULSE_PRIORITY , &xTaskPulse);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
+	if (xSemaphore_send !=NULL)
+    {
+        // creating tasks and their handles  
+        TaskHandle_t xTaskWatch = NULL;
+        TaskHandle_t xTaskSend = NULL;
+		xTaskCreate(vTaskWatch, "WATCH", 4096, NULL , WATCH_PRIORITY , &xTaskWatch);
+		xTaskCreate(vTaskSend, "SEND", 4096, NULL , PULSE_PRIORITY , &xTaskSend);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+	}
 
 }

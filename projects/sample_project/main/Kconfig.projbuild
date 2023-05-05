@@ -1,14 +1,5 @@
 menu "Example Configuration"
 
-    config EXAMPLE_IPV4
-        bool "IPV4"
-        default y
-
-    config EXAMPLE_IPV6
-        bool "IPV6"
-        default n
-        select EXAMPLE_CONNECT_IPV6
-
     config EXAMPLE_PORT
         int "Port"
         range 0 65535
@@ -17,17 +8,22 @@ menu "Example Configuration"
             Local port the example server will listen on.
 
 	config EXAMPLE_STATIC_IP_ADDR
-        string "Static IP address"
-        default "192.168.52.124"
+        string "wESP32 Static IP address"
+        default "192.168.98.124"
         help
-            Set static IP address.
+            Set static IP address for wESP32
 
     config EXAMPLE_STATIC_NETMASK_ADDR
-        string "Static netmask address"
+        string "wESP32 Static netmask address"
         default "255.255.255.0"
         help
-            Set static netmask address.
-
+            Set static netmask address for wESP32
+	
+    config HOST_IP_ADDR
+        string "Host computer static IP address"
+        default "192.168.98.44"
+        help
+            Specify static ip address for host computer
 
 	config GPIO_JUICE
         int "Juice GPIO"
@@ -47,5 +43,22 @@ menu "Example Configuration"
         help
 			GPIO number on wESP32 to control when lights get turned off.
 
+	config PULSE_LENGTH_MSEC
+        int "Pulse length in miliseconds"
+        default 1000
+        help
+			Length of the GPIO pulse in miliseconds
+
+	config TIMEOUT_SOCKET_SEC
+        int "Timeout of the socket in seconds"
+        default 300
+        help
+			Length of the timeout of the socket in seconds before socket restarts
+
+	config TIMEOUT_SOCKET_USEC
+        int "Timeout of the socket in microseconds"
+        default 0
+        help
+			Length of the timeout of the socket in microseconds
 
 endmenu
