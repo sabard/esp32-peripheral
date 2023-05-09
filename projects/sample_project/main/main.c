@@ -165,13 +165,13 @@ static void udp_server_task(void *pvParameters)
     char addr_str[128];
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
-    struct sockaddr_in dest_addr;
+    struct sockaddr_in addr;
 
     while (1) {
 
-        dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(PORT);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(PORT);
         ip_protocol = IPPROTO_IP;
 
         sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
@@ -188,7 +188,7 @@ static void udp_server_task(void *pvParameters)
         timeout.tv_usec = TIMEOUT_SOCKET_USEC;
         setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-        int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        int err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         if (err < 0) {
             ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         }
@@ -427,12 +427,12 @@ void vTaskSend( void * pvParameters )
 		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
 		{
             printf("debug20");
-            struct sockaddr_in dest_addr1;
-            dest_addr1.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
-            dest_addr1.sin_family = AF_INET;
-            dest_addr1.sin_port = htons(PORT);
+            struct sockaddr_in dest_addr;
+            dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+            dest_addr.sin_family = AF_INET;
+            dest_addr.sin_port = htons(PORT);
             printf("debug21");
-            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr1, sizeof(dest_addr1));
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             printf("debug22");
             if (err < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
