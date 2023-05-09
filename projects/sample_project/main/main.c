@@ -65,6 +65,7 @@ static int sock; // global socket variable to be accessed by both udp server and
 SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
 
+
 /** Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data)
@@ -164,22 +165,14 @@ static void udp_server_task(void *pvParameters)
     char addr_str[128];
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
-    struct sockaddr_in6 dest_addr;
+    struct sockaddr_in dest_addr;
 
     while (1) {
 
-        if (addr_family == AF_INET) {
-            struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
-            dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
-            dest_addr_ip4->sin_family = AF_INET;
-            dest_addr_ip4->sin_port = htons(PORT);
-            ip_protocol = IPPROTO_IP;
-        } else if (addr_family == AF_INET6) {
-            bzero(&dest_addr.sin6_addr.un, sizeof(dest_addr.sin6_addr.un));
-            dest_addr.sin6_family = AF_INET6;
-            dest_addr.sin6_port = htons(PORT);
-            ip_protocol = IPPROTO_IPV6;
-        }
+        dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(PORT);
+        ip_protocol = IPPROTO_IP;
 
         sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
         if (sock < 0) {
@@ -188,15 +181,6 @@ static void udp_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Socket created");
 
-#if defined(CONFIG_EXAMPLE_IPV4) && defined(CONFIG_EXAMPLE_IPV6)
-        if (addr_family == AF_INET6) {
-            // Note that by default IPV6 binds to both protocols, it is must be disabled
-            // if both protocols used at the same time (used in CI)
-            int opt = 1;
-            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-            setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
-        }
-#endif
 
         // Set timeout
         struct timeval timeout;
@@ -218,11 +202,7 @@ static void udp_server_task(void *pvParameters)
 			ESP_LOGI(TAG, "debug4");
             ESP_LOGI(TAG, "Waiting for data");
 			ESP_LOGI(TAG, "debug5");
-#if defined(CONFIG_LWIP_NETBUF_RECVINFO) && !defined(CONFIG_EXAMPLE_IPV6)
-            int len = recvmsg(sock, &msg, 0);
-#else
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-#endif
             ESP_LOGI(TAG, "debug1");
 			// Error occurred during receiving
             if (len < 0) {
@@ -447,12 +427,12 @@ void vTaskSend( void * pvParameters )
 		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
 		{
             printf("debug20");
-            struct sockaddr_in dest_addr;
-            dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
-            dest_addr.sin_family = AF_INET;
-            dest_addr.sin_port = htons(PORT);
+            struct sockaddr_in dest_addr1;
+            dest_addr1.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+            dest_addr1.sin_family = AF_INET;
+            dest_addr1.sin_port = htons(PORT);
             printf("debug21");
-            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr1, sizeof(dest_addr1));
             printf("debug22");
             if (err < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
