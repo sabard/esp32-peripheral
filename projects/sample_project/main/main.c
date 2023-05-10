@@ -40,6 +40,7 @@
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
+#define SEND_PRIORITY (tskIDLE_PRIORITY+5) 
 #define TOGGLE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
@@ -61,7 +62,6 @@ SemaphoreHandle_t xSemaphore_force_off = NULL;
 SemaphoreHandle_t xSemaphore_pulse = NULL;
 static int pin_char;
 const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
-static int sock; // global socket variable to be accessed by both udp server and client functions 
 SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
 
@@ -166,10 +166,11 @@ static void udp_server_task(void *pvParameters)
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     struct sockaddr_in addr;
+    int sock;
 
     while (1) {
 
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_addr.s_addr =htonl(INADDR_ANY);  
         addr.sin_family = AF_INET;
         addr.sin_port = htons(PORT);
         ip_protocol = IPPROTO_IP;
@@ -179,7 +180,7 @@ static void udp_server_task(void *pvParameters)
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
-        ESP_LOGI(TAG, "Socket created");
+        ESP_LOGI(TAG, "Server socket created");
 
 
         // Set timeout
@@ -419,30 +420,54 @@ void vTaskWatch( void *pvParameters )
 }
 
 // UDP client task function
-void vTaskSend( void * pvParameters )
+void udp_client_task( void * pvParameters )
 {
     printf("debug19");
-	for ( ;; )
-	{
-		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
-		{
-            printf("debug20");
-            struct sockaddr_in dest_addr;
-            dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
-            dest_addr.sin_family = AF_INET;
-            dest_addr.sin_port = htons(PORT);
-            printf("debug21");
-            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-            printf("debug22");
-            if (err < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
-            }
-            printf("debug23");
-            ESP_LOGI(TAG, "Message sent");	
-		}
-		printf("end of loop -- send\n");
-	}
+    int addr_family = 0;
+    int ip_protocol = 0;
+    
+    while (1) {
+        struct sockaddr_in dest_addr;
+        dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(PORT);
+        addr_family = AF_INET;
+        ip_protocol = IPPROTO_IP;
+
+        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        if (sock < 0) {
+            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            break;
+        }
+        ESP_LOGI(TAG, "Client Socket created");
+    
+        // Set timeout
+        struct timeval timeout;
+        timeout.tv_sec = TIMEOUT_SOCKET_SEC;
+        timeout.tv_usec = TIMEOUT_SOCKET_USEC;
+        setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+        
+    
+        printf("debug20");
+         
+    	for ( ;; )
+    	{
+    		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
+    		{
+                printf("debug21");
+                int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+                printf("debug22");
+                if (err < 0) {
+                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                    break;
+                }
+                printf("debug23");
+                ESP_LOGI(TAG, "Message sent");	
+    		}
+    		printf("end of loop -- send\n");
+    	}
+
+    }
 	
 }
 
@@ -461,7 +486,7 @@ void app_main(void)
 {
 	init_wesp32_eth();
 	
-    xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
+    xTaskCreate(udp_server_task, "UDP_SERVER", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
 
 	configure_led();
 
@@ -522,9 +547,8 @@ void app_main(void)
     {
         // creating tasks and their handles  
         TaskHandle_t xTaskWatch = NULL;
-        TaskHandle_t xTaskSend = NULL;
 		xTaskCreate(vTaskWatch, "WATCH", 4096, NULL , WATCH_PRIORITY , &xTaskWatch);
-		xTaskCreate(vTaskSend, "SEND", 4096, NULL , PULSE_PRIORITY , &xTaskSend);
+		xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , SEND_PRIORITY , NULL);
     }
     else
     {
