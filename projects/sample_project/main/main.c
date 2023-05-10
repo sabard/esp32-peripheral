@@ -34,8 +34,8 @@
 #include <lwip/netdb.h>
 
 #define PORT CONFIG_EXAMPLE_PORT
-#define EXAMPLE_STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
-#define EXAMPLE_STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
+#define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
+#define STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
@@ -104,13 +104,13 @@ static void example_set_static_ip(esp_netif_t *netif)
     }
     esp_netif_ip_info_t ip;
     memset(&ip, 0 , sizeof(esp_netif_ip_info_t));
-    ip.ip.addr = ipaddr_addr(EXAMPLE_STATIC_IP_ADDR);
-    ip.netmask.addr = ipaddr_addr(EXAMPLE_STATIC_NETMASK_ADDR);
+    ip.ip.addr = ipaddr_addr(STATIC_IP_ADDR);
+    ip.netmask.addr = ipaddr_addr(STATIC_NETMASK_ADDR);
     if (esp_netif_set_ip_info(netif, &ip) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set ip info");
         return;
     }
-    ESP_LOGD(TAG, "Success to set static ip: %s, netmask: %s", EXAMPLE_STATIC_IP_ADDR, EXAMPLE_STATIC_NETMASK_ADDR);
+    ESP_LOGD(TAG, "Success to set static ip: %s, netmask: %s", STATIC_IP_ADDR, STATIC_NETMASK_ADDR);
 }
 
 
@@ -170,7 +170,7 @@ static void udp_server_task(void *pvParameters)
 
     while (1) {
 
-        addr.sin_addr.s_addr =htonl(INADDR_ANY);  
+        addr.sin_addr.s_addr =inet_addr(STATIC_IP_ADDR);  // htonl(INADDR_ANY);  
         addr.sin_family = AF_INET;
         addr.sin_port = htons(PORT);
         ip_protocol = IPPROTO_IP;
