@@ -33,6 +33,8 @@
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
 
+#include "polaris.h"
+
 #define PORT CONFIG_EXAMPLE_PORT
 #define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
 #define STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
@@ -46,6 +48,7 @@
 #define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
 #define PULSE_PRIORITY  (tskIDLE_PRIORITY+5)
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
+#define POLARIS_PRIORITY  (tskIDLE_PRIORITY+5)
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 #define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
@@ -60,7 +63,9 @@ SemaphoreHandle_t xSemaphore_toggle = NULL;
 SemaphoreHandle_t xSemaphore_force_on = NULL;
 SemaphoreHandle_t xSemaphore_force_off = NULL;
 SemaphoreHandle_t xSemaphore_pulse = NULL;
+SemaphoreHandle_t xSemaphore_polaris = NULL;
 static int pin_char;
+static int polaris_state;
 const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
 SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
@@ -187,7 +192,7 @@ static void udp_server_task(void *pvParameters)
         struct timeval timeout;
         timeout.tv_sec = TIMEOUT_SOCKET_SEC;
         timeout.tv_usec = TIMEOUT_SOCKET_USEC;
-        setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+        // setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
         int err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         if (err < 0) {
@@ -200,11 +205,8 @@ static void udp_server_task(void *pvParameters)
 
 
         while (1) {
-			ESP_LOGI(TAG, "debug4");
-            ESP_LOGI(TAG, "Waiting for data");
-			ESP_LOGI(TAG, "debug5");
+            ESP_LOGI(TAG, "Waiting for data...");
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-            ESP_LOGI(TAG, "debug1");
 			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
@@ -212,43 +214,50 @@ static void udp_server_task(void *pvParameters)
             }
             // Data received
             else {
-				ESP_LOGI(TAG, "debug2");	
+				ESP_LOGI(TAG, "Data received");
                 // Get the sender's ip address as string
                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
 
-                ESP_LOGI(TAG, "debug3");
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
 				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
-				if (rx_buffer[0] == 't'){ // toggle
+                if (strncmp(rx_buffer, "polaris_init", 12) == 0) {
+                    polaris_state = 0;
+                    xSemaphoreGive( xSemaphore_polaris );
+                }
+                else if (strncmp(rx_buffer, "polaris_read", 12) == 0) {
+                    polaris_state = 1;
+                    xSemaphoreGive( xSemaphore_polaris );
+                }
+				else if (rx_buffer[0] == 't'){ // toggle
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_toggle );
 				}
-				if (rx_buffer[0] == 'f'){ // force on
+				else if (rx_buffer[0] == 'f'){ // force on
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_force_on );
 				}
-				if (rx_buffer[0] == 'g'){ // force off
+				else if (rx_buffer[0] == 'g'){ // force off
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_force_off );
 				}
-				if (rx_buffer[0] == 'p'){ // pulse
+				else if (rx_buffer[0] == 'p'){ // pulse
 					pin_char = rx_buffer[1];
 					xSemaphoreGive( xSemaphore_pulse );
 				}
- 
+
 
             }
         }
     }
- 
+
 
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
-   
+
     vTaskDelete(NULL);
 }
 
@@ -262,7 +271,7 @@ void vTaskToggle( void * pvParameters )
 			if (pin_char == 'j'){
 
             	printf("TOGGLE JUICE\n");
-            	state_juice=!state_juice; 
+            	state_juice=!state_juice;
 				gpio_set_level(JUICE_GPIO, state_juice);
             	ESP_LOGI(TAG, "state juice: %d", state_juice);
 			}
@@ -295,7 +304,7 @@ void vTaskForceOn( void * pvParameters )
         {
 			if (pin_char == 'j'){
             	printf("FORCE ON JUICE\n");
-            	state_juice=1; 
+            	state_juice=1;
 				gpio_set_level(JUICE_GPIO, state_juice);
             	ESP_LOGI(TAG, "state juice: %d", state_juice);
 			}
@@ -326,7 +335,7 @@ void vTaskForceOff( void * pvParameters )
         {
 			if (pin_char == 'j'){
             	printf("FORCE OFF JUICE\n");
-            	state_juice=0; 
+            	state_juice=0;
 				gpio_set_level(JUICE_GPIO, state_juice);
             	ESP_LOGI(TAG, "state juice: %d", state_juice);
 			}
@@ -404,6 +413,21 @@ void vTaskPulse( void * pvParameters )
 
 }
 
+void vTaskPolaris( void *pvParameters )
+{
+    char polaris_read_buf[256];
+
+    for ( ;; ) {
+        if ( xSemaphoreTake( xSemaphore_polaris, portMAX_DELAY) == pdTRUE ) {
+            if (polaris_state == 0) {
+                polaris_send_init_seq();
+            }
+            else if (polaris_state == 1) {
+                polaris_read(&polaris_read_buf);
+            }
+        }
+    }
+}
 
 void vTaskWatch( void *pvParameters )
 {
@@ -422,10 +446,10 @@ void vTaskWatch( void *pvParameters )
 // UDP client task function
 void udp_client_task( void * pvParameters )
 {
-    printf("debug19");
+    ESP_LOGI(TAG, "Client task started");
     int addr_family = 0;
     int ip_protocol = 0;
-    
+
     while (1) {
         struct sockaddr_in dest_addr;
         dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
@@ -439,16 +463,14 @@ void udp_client_task( void * pvParameters )
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
-        ESP_LOGI(TAG, "Client Socket created");
-    
+
         // Set timeout
         struct timeval timeout;
         timeout.tv_sec = TIMEOUT_SOCKET_SEC;
         timeout.tv_usec = TIMEOUT_SOCKET_USEC;
         setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
-        
-    
-        printf("debug20");
+
+        ESP_LOGI(TAG, "Client Socket created");
          
     	for ( ;; )
     	{
@@ -490,12 +512,15 @@ void app_main(void)
 
 	configure_led();
 
+    polaris_setup_uart();
+
     // creating semaphore
 	xSemaphore_toggle = xSemaphoreCreateBinary();
 	xSemaphore_force_on = xSemaphoreCreateBinary();
 	xSemaphore_force_off = xSemaphoreCreateBinary();
 	xSemaphore_pulse = xSemaphoreCreateBinary();
 	xSemaphore_send = xSemaphoreCreateBinary();
+    xSemaphore_polaris = xSemaphoreCreateBinary();
     
 
 	if (xSemaphore_toggle !=NULL)
@@ -543,6 +568,18 @@ void app_main(void)
     {
         printf("semaphore did not create sucessfully\n");
 	}
+
+    if (xSemaphore_polaris !=NULL)
+    {
+        // creating tasks and their handles
+        TaskHandle_t xTaskPolaris = NULL;
+        xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
+    }
+    else
+    {
+        printf("semaphore did not create sucessfully\n");
+    }
+
 	if (xSemaphore_send !=NULL)
     {
         // creating tasks and their handles  
@@ -554,5 +591,4 @@ void app_main(void)
     {
         printf("semaphore did not create sucessfully\n");
 	}
-
 }
