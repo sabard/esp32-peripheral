@@ -43,6 +43,18 @@ menu "Example Configuration"
         help
 			GPIO number on wESP32 to control when lights get turned off.
 
+    config GPIO_SERIAL_TX
+        int "Serial TX GPIO"
+        default 33
+        help
+            GPIO number on wEsp32 for serial transmission.
+
+    config GPIO_SERIAL_RX
+        int "Serial RX GPIO"
+        default 39
+        help
+            GPIO number on wEsp32 for serial reception.
+
 	config PULSE_LENGTH_MSEC
         int "Pulse length in miliseconds"
         default 1000
