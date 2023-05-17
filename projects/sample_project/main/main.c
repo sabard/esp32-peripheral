@@ -32,6 +32,7 @@
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
+#include "msgpack.h"
 
 #define PORT CONFIG_EXAMPLE_PORT
 #define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
