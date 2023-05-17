@@ -2,23 +2,13 @@ import os
 import socket
 import msgpack
 
-<<<<<<< HEAD
-port = 2000 #3333
-wesp_ip_address = "127.0.0.1" #"192.168.98.124"
-#payload = {
-#        "key": 1,
-#        "another_key":"another_value",
-#        }
-payload = "Hello"
-=======
 port = 3333
-wesp_ip_address = "172.17.3.174"
+wesp_ip_address = "192.168.98.124" #"172.17.3.174" #"192.168.98.124"
 default_payload = {
     "key": 1,
     "another_key": "another_value",
 }
 
->>>>>>> f888853c0d14535530a187af21ffb698ba941457
 
 # set up UDP server on lico
 def set_UDP_sock(address, port):
@@ -40,17 +30,9 @@ def set_UDP_sock(address, port):
 
 def send_UDP_packet(sock, addr, payload):
     # incorporate msg pack here 
-<<<<<<< HEAD
-    #packed = msgpack.packb(payload, use_bin_type=True)
-    try:
-        #print(packed)
-        #sock.sendto(packed.encode(), addr)
-        sock.sendto(payload.encode(), addr)
-=======
     try:
         print(payload)
         sock.sendto(payload, addr)
->>>>>>> f888853c0d14535530a187af21ffb698ba941457
     except socket.timeout:
         print('Socket operation timeout')
         return ''

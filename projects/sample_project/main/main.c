@@ -32,7 +32,7 @@
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
-#include "msgpack.h"
+//#include "msgpack.h"
 
 #include "polaris.h"
 
@@ -190,9 +190,9 @@ static void udp_server_task(void *pvParameters)
 
 
         // Set timeout
-        struct timeval timeout;
-        timeout.tv_sec = TIMEOUT_SOCKET_SEC;
-        timeout.tv_usec = TIMEOUT_SOCKET_USEC;
+       // struct timeval timeout;
+       // timeout.tv_sec = TIMEOUT_SOCKET_SEC;
+       // timeout.tv_usec = TIMEOUT_SOCKET_USEC;
         // setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
         int err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
