@@ -32,7 +32,7 @@
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
-//#include "msgpack.h"
+#include "msgpack.h"
 
 #include "polaris.h"
 
@@ -44,7 +44,7 @@
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
 #define SEND_PRIORITY (tskIDLE_PRIORITY+5) 
-#define TOGGLE_PRIORITY  (tskIDLE_PRIORITY+5)
+#define GPIO_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
 #define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
 #define PULSE_PRIORITY  (tskIDLE_PRIORITY+5)
@@ -53,6 +53,7 @@
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 #define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
+#define BUFFER_SIZE 1500  // buffer size of recieving bytes 
 
 static const char *TAG = "eth_example";
 char input;
@@ -60,7 +61,7 @@ int number;
 static uint8_t state_juice=0;
 static uint8_t state_light_on=0;
 static uint8_t state_light_off=0;
-SemaphoreHandle_t xSemaphore_toggle = NULL;
+SemaphoreHandle_t xSemaphore_gpio = NULL;
 SemaphoreHandle_t xSemaphore_force_on = NULL;
 SemaphoreHandle_t xSemaphore_force_off = NULL;
 SemaphoreHandle_t xSemaphore_pulse = NULL;
@@ -71,8 +72,71 @@ const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
 SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
 
+typedef struct {
+    int gpio;
+    struct module {
+        char* action;
+        int duration;
+        int delay;
+        int repeat;
+    } *act_seq[]; // an unspecified array of pointers to the module structs
+} Op_gpio;
 
-/** Event handler for Ethernet events */
+static Op_gpio *op;
+
+
+void parse_keys(char* keys[], msgpack_object_kv* map_ptr){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq 
+    if (!strcmp(keys[0], "gpio")) { // if dict is a gpio operation
+        op = malloc(sizeof(Op_gpio)); // creating/overwriting for new op dict
+        op->gpio = map_ptr[0].val.via.i64;
+
+        int num_actions = map_ptr[1].val.via.array.size;
+        printf("There are %d actions\n", num_actions);
+        int a;
+        for (a=0;a<num_actions;a++) {
+            op->act_seq[a] = malloc(sizeof(struct module));
+            msgpack_object_str act_str_obj= map_ptr[1].val.via.array.ptr[a].via.map.ptr[0].val.via.str; // 1st index (1) is for act_seq, 2nd index (a) is for action number, 3rd index (0) is for what config of the action, in this case "action"
+            op->act_seq[a]->action = (char*)malloc(act_str_obj.size*sizeof(char));
+            for (int l=0; l<act_str_obj.size; l++) {
+                op->act_seq[a]->action[l] = *(act_str_obj.ptr + l);
+            }
+            op->act_seq[a]->duration = map_ptr[1].val.via.array.ptr[a].via.map.ptr[1].val.via.i64;
+            op->act_seq[a]->delay = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
+            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
+
+        }
+        // SEND SEMAPHORE TO TRIGGER TASK TO IMPLEMENT GPIO OPERATION
+        xSemaphoreGive( xSemaphore_gpio );
+    } 
+
+}
+
+
+void parse_object(msgpack_object obj) {
+    if (obj.type == 7) {  // if the deserialized data is dict/map
+        uint32_t map_size = obj.via.map.size;
+        msgpack_object_kv* map_ptr = obj.via.map.ptr; // pointer to msgpack_object_map
+        char* keys[map_size];
+        for (int n=0; n<map_size; n++) { // for each key/value pair in the dict, get the list of keys
+            msgpack_object_str key_str_obj = map_ptr[n].key.via.str; // get msgpack_object_str
+            int keysize = key_str_obj.size;
+            printf("keysize is %d\n", keysize);
+            char* key_str = (char*) malloc((keysize+1)*sizeof(char));
+            for (int j=0; j<keysize; j++) { // extract out byte by byte the key 
+                key_str[j] = *(key_str_obj.ptr+j);
+            }
+            key_str[keysize] = 0;
+            keys[n] = key_str;
+        }
+
+        parse_keys(keys, map_ptr);
+
+    }
+
+}
+
+
+/* Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
                               int32_t event_id, void *event_data)
 {
@@ -167,8 +231,7 @@ static void init_wesp32_eth()
 
 static void udp_server_task(void *pvParameters)
 {
-    char rx_buffer[1500];
-    char addr_str[128];
+    char recbytes[1500];
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     struct sockaddr_in addr;
@@ -188,13 +251,6 @@ static void udp_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Server socket created");
 
-
-        // Set timeout
-       // struct timeval timeout;
-       // timeout.tv_sec = TIMEOUT_SOCKET_SEC;
-       // timeout.tv_usec = TIMEOUT_SOCKET_USEC;
-        // setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
-
         int err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         if (err < 0) {
             ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
@@ -207,7 +263,7 @@ static void udp_server_task(void *pvParameters)
 
         while (1) {
             ESP_LOGI(TAG, "Waiting for data...");
-            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+            int len = recvfrom(sock, recbytes, sizeof(recbytes), 0, (struct sockaddr *)&source_addr, &socklen);
 			// Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
@@ -215,82 +271,63 @@ static void udp_server_task(void *pvParameters)
             }
             // Data received
             else {
-				ESP_LOGI(TAG, "Data received");
-                // Get the sender's ip address as string
-                inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-
-                rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
-				ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
-                ESP_LOGI(TAG, "%s", rx_buffer);
-                if (strncmp(rx_buffer, "polaris_init", 12) == 0) {
+				ESP_LOGI(TAG, "Data received. Bytes recieved: %d", len);
+                if (strncmp(recbytes, "polaris_init", 12) == 0) {
                     polaris_state = 0;
                     xSemaphoreGive( xSemaphore_polaris );
                 }
-                else if (strncmp(rx_buffer, "polaris_read", 12) == 0) {
+                else if (strncmp(recbytes, "polaris_read", 12) == 0) {
                     polaris_state = 1;
                     xSemaphoreGive( xSemaphore_polaris );
                 }
-				else if (rx_buffer[0] == 't'){ // toggle
-					pin_char = rx_buffer[1];
-					xSemaphoreGive( xSemaphore_toggle );
-				}
-				else if (rx_buffer[0] == 'f'){ // force on
-					pin_char = rx_buffer[1];
-					xSemaphoreGive( xSemaphore_force_on );
-				}
-				else if (rx_buffer[0] == 'g'){ // force off
-					pin_char = rx_buffer[1];
-					xSemaphoreGive( xSemaphore_force_off );
-				}
-				else if (rx_buffer[0] == 'p'){ // pulse
-					pin_char = rx_buffer[1];
-					xSemaphoreGive( xSemaphore_pulse );
-				}
+                else {
+                    // Initalize unpacked object
+                    msgpack_unpacked und;
+                    msgpack_unpacked_init(&und);
+        
+                    //Unpack
+                    msgpack_unpack_return ret;
+                    ret = msgpack_unpack_next(&und, recbytes, len, NULL);
+                    if (ret == MSGPACK_UNPACK_SUCCESS) {
+                        msgpack_object object = und.data;
+                        msgpack_object_print(stdout, object);
+                        printf("\n");
+                        // Do stuff with unpacked object...
+                        parse_object(object);
+                    }
+                    else {
+                        printf("Error in unpacking");
+                    }
+                
+                    // Destroy unpacked object
+                    msgpack_unpacked_destroy(&und);
 
+                }
 
             }
+       
+    
         }
-    }
-
-
+        
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
+        
+    }
 
-    vTaskDelete(NULL);
 }
 
 
-void vTaskToggle( void * pvParameters )
+void vTaskGPIO( void * pvParameters )
 {
     for ( ;; )
     {
-        if ( xSemaphoreTake( xSemaphore_toggle, portMAX_DELAY) == pdTRUE )
+        if ( xSemaphoreTake( xSemaphore_gpio, portMAX_DELAY) == pdTRUE )
         {
-			if (pin_char == 'j'){
-
-            	printf("TOGGLE JUICE\n");
-            	state_juice=!state_juice;
-				gpio_set_level(JUICE_GPIO, state_juice);
-            	ESP_LOGI(TAG, "state juice: %d", state_juice);
-			}
-			if (pin_char == 'l'){
-
-            	printf("TOGGLE LIGHT ON\n");
-            	state_light_on=!state_light_on;
-				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
-			}
-			if (pin_char == 'o'){
-
-            	printf("TOGGLE LIGHT OFF\n");
-            	state_light_off=!state_light_off;
-				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
-			}
-
+            printf("Hooray, we made it to vTaskGPIO\n");
+            printf("the gpio is %d\n", op->gpio);
         }
     }
 
@@ -477,17 +514,13 @@ void udp_client_task( void * pvParameters )
     	{
     		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
     		{
-                printf("debug21");
-                int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                printf("debug22");
+                int err = sendto(sock, payload, strlen(payload)+1, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 if (err < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
                 }
-                printf("debug23");
                 ESP_LOGI(TAG, "Message sent");	
     		}
-    		printf("end of loop -- send\n");
     	}
 
     }
@@ -516,7 +549,7 @@ void app_main(void)
     polaris_setup_uart();
 
     // creating semaphore
-	xSemaphore_toggle = xSemaphoreCreateBinary();
+	xSemaphore_gpio = xSemaphoreCreateBinary();
 	xSemaphore_force_on = xSemaphoreCreateBinary();
 	xSemaphore_force_off = xSemaphoreCreateBinary();
 	xSemaphore_pulse = xSemaphoreCreateBinary();
@@ -524,11 +557,11 @@ void app_main(void)
     xSemaphore_polaris = xSemaphoreCreateBinary();
     
 
-	if (xSemaphore_toggle !=NULL)
+	if (xSemaphore_gpio !=NULL)
     {
         // creating tasks and their handles  
-		TaskHandle_t xTaskToggle = NULL;
-		xTaskCreate(vTaskToggle, "TOGGLE", 4096, NULL , TOGGLE_PRIORITY , &xTaskToggle);
+		TaskHandle_t xTaskGPIO = NULL;
+		xTaskCreate(vTaskGPIO, "GPIO", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
 
     }
     else
