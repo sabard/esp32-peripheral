@@ -45,70 +45,60 @@
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
 #define SEND_PRIORITY (tskIDLE_PRIORITY+5) 
 #define GPIO_PRIORITY  (tskIDLE_PRIORITY+5)
-#define FORCE_ON_PRIORITY  (tskIDLE_PRIORITY+5)
-#define FORCE_OFF_PRIORITY  (tskIDLE_PRIORITY+5)
-#define PULSE_PRIORITY  (tskIDLE_PRIORITY+5)
-#define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
 #define POLARIS_PRIORITY  (tskIDLE_PRIORITY+5)
-#define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
-#define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 #define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
-#define BUFFER_SIZE 1500  // buffer size of recieving bytes 
+#define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 
 static const char *TAG = "eth_example";
 char input;
 int number;
-static uint8_t state_juice=0;
-static uint8_t state_light_on=0;
-static uint8_t state_light_off=0;
 SemaphoreHandle_t xSemaphore_gpio = NULL;
-SemaphoreHandle_t xSemaphore_force_on = NULL;
-SemaphoreHandle_t xSemaphore_force_off = NULL;
-SemaphoreHandle_t xSemaphore_pulse = NULL;
 SemaphoreHandle_t xSemaphore_polaris = NULL;
-static int pin_char;
 static int polaris_state;
-const TickType_t xDelay = PULSE_LENGTH_MSEC / portTICK_PERIOD_MS;
 SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
 
 typedef struct {
     int gpio;
+    int num_actions;
     struct module {
         char* action;
         int duration;
-        int delay;
+        int delay_pre;
+        int delay_post;
         int repeat;
-    } *act_seq[]; // an unspecified array of pointers to the module structs
+    } *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
 } Op_gpio;
 
-static Op_gpio *op;
-
+Op_gpio *op;
 
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq 
     if (!strcmp(keys[0], "gpio")) { // if dict is a gpio operation
         op = malloc(sizeof(Op_gpio)); // creating/overwriting for new op dict
         op->gpio = map_ptr[0].val.via.i64;
 
-        int num_actions = map_ptr[1].val.via.array.size;
-        printf("There are %d actions\n", num_actions);
-        int a;
-        for (a=0;a<num_actions;a++) {
+        op->num_actions = map_ptr[1].val.via.array.size;
+        printf("There are %d actions\n", op->num_actions);
+        for (int a = 0 ; a < op->num_actions; a++) {
+
             op->act_seq[a] = malloc(sizeof(struct module));
+            
             msgpack_object_str act_str_obj= map_ptr[1].val.via.array.ptr[a].via.map.ptr[0].val.via.str; // 1st index (1) is for act_seq, 2nd index (a) is for action number, 3rd index (0) is for what config of the action, in this case "action"
-            op->act_seq[a]->action = (char*)malloc(act_str_obj.size*sizeof(char));
-            for (int l=0; l<act_str_obj.size; l++) {
+            op->act_seq[a]->action = (char*) malloc((act_str_obj.size+1)*sizeof(char));
+            
+            for (int l=0; l<act_str_obj.size; l++) { 
                 op->act_seq[a]->action[l] = *(act_str_obj.ptr + l);
             }
+            op->act_seq[a]->action[act_str_obj.size] = 0;
+            
             op->act_seq[a]->duration = map_ptr[1].val.via.array.ptr[a].via.map.ptr[1].val.via.i64;
-            op->act_seq[a]->delay = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
-            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
-
+            op->act_seq[a]->delay_pre = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
+            op->act_seq[a]->delay_post = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
+            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[4].val.via.i64;
+            
         }
-        // SEND SEMAPHORE TO TRIGGER TASK TO IMPLEMENT GPIO OPERATION
         xSemaphoreGive( xSemaphore_gpio );
     } 
-
 }
 
 
@@ -122,7 +112,7 @@ void parse_object(msgpack_object obj) {
             int keysize = key_str_obj.size;
             printf("keysize is %d\n", keysize);
             char* key_str = (char*) malloc((keysize+1)*sizeof(char));
-            for (int j=0; j<keysize; j++) { // extract out byte by byte the key 
+            for (int j=0; j<keysize; j++) { // extract out byte by byte the key bc strcpy doesn't work 
                 key_str[j] = *(key_str_obj.ptr+j);
             }
             key_str[keysize] = 0;
@@ -326,130 +316,58 @@ void vTaskGPIO( void * pvParameters )
     {
         if ( xSemaphoreTake( xSemaphore_gpio, portMAX_DELAY) == pdTRUE )
         {
-            printf("Hooray, we made it to vTaskGPIO\n");
-            printf("the gpio is %d\n", op->gpio);
+            bool gpio_state = 0; 
+            for (int a = 0; a < op->num_actions; a++) { // for each action
+                int repeat_counter = 0;
+                int repeat = 1;
+                while (repeat) {
+
+                     // pre-delay
+                     if (op->act_seq[a]->delay_pre > 0) {
+                         printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre); 
+                         vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+                     }
+
+                     // action
+                     if (!strcmp(op->act_seq[a]->action, "up")) 
+                         gpio_state = 1;
+                     else if (!strcmp(op->act_seq[a]->action, "down")) 
+                         gpio_state = 0;
+                     printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
+                     gpio_set_level(op->gpio, gpio_state); 
+                     if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state 
+                        vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);  
+                        gpio_set_level(op->gpio, !gpio_state);
+                     }
+
+
+                     // post-delay
+                     if (op->act_seq[a]->delay_post > 0) {
+                         printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post); 
+                         vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
+
+                     }
+
+                     // check repeat
+                     if (op->act_seq[a]->repeat == 0) 
+                         repeat = 0;
+                     else if (op->act_seq[a]->repeat > 0) {
+                        if (repeat_counter == op->act_seq[a]->repeat) 
+                            repeat = 0;
+                        else 
+                            repeat_counter++;
+                     }
+                   
+                }
+
+            }
+            
         }
     }
 
 }
 
 
-void vTaskForceOn( void * pvParameters )
-{
-    for ( ;; )
-    {
-        if ( xSemaphoreTake( xSemaphore_force_on, portMAX_DELAY) == pdTRUE )
-        {
-			if (pin_char == 'j'){
-            	printf("FORCE ON JUICE\n");
-            	state_juice=1;
-				gpio_set_level(JUICE_GPIO, state_juice);
-            	ESP_LOGI(TAG, "state juice: %d", state_juice);
-			}
-			if (pin_char == 'l'){
-            	printf("FORCE ON LIGHT ON\n");
-            	state_light_on=1;
-				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
-			}
-			if (pin_char == 'o'){
-            	printf("FORCE ON LIGHT OFF\n");
-            	state_light_off=1;
-				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
-			}
-
-        }
-    }
-
-}
-
-
-void vTaskForceOff( void * pvParameters )
-{
-    for ( ;; )
-    {
-        if ( xSemaphoreTake( xSemaphore_force_off, portMAX_DELAY) == pdTRUE )
-        {
-			if (pin_char == 'j'){
-            	printf("FORCE OFF JUICE\n");
-            	state_juice=0;
-				gpio_set_level(JUICE_GPIO, state_juice);
-            	ESP_LOGI(TAG, "state juice: %d", state_juice);
-			}
-			if (pin_char == 'l'){
-            	printf("FORCE OFF LIGHT ON\n");
-            	state_light_on=0;
-				gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            	ESP_LOGI(TAG, "state light on: %d", state_light_on);
-			}
-			if (pin_char == 'o'){
-            	printf("FORCE OFF LIGHT OFF\n");
-            	state_light_off=0;
-				gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            	ESP_LOGI(TAG, "state light off: %d", state_light_off);
-			}
-
-        }
-    }
-
-}
-
-
-void vTaskPulse( void * pvParameters )
-{
-    for ( ;; )
-    {
-        if ( xSemaphoreTake( xSemaphore_pulse, portMAX_DELAY) == pdTRUE )
-        {
-			if (pin_char == 'j'){
-            	printf("PULSE JUICE\n");
-            	if (state_juice==0) {
-					state_juice=1;
-            		ESP_LOGI(TAG, "state juice: %d", state_juice);
-					gpio_set_level(JUICE_GPIO, state_juice);
-					vTaskDelay(xDelay);
-					state_juice=0;
-					gpio_set_level(JUICE_GPIO, state_juice);
-            		ESP_LOGI(TAG, "state juice: %d", state_juice);
-				} else {
-						printf("Cannot pulse due to state not being at 0");
-				}
-			}
-			if (pin_char == 'l'){
-            	printf("PULSE LIGHT ON\n");
-            	if (state_light_on==0) {
-					state_light_on=1;
-            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
-					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-					vTaskDelay(xDelay);
-					state_light_on=0;
-					gpio_set_level(LIGHT_ON_GPIO, state_light_on);
-            		ESP_LOGI(TAG, "state light on: %d", state_light_on);
-				} else {
-						printf("Cannot pulse due to state not being at 0");
-				}
-			}
-			if (pin_char == 'o'){
-            	printf("PULSE LIGHT OFF\n");
-            	if (state_light_off==0) {
-					state_light_off=1;
-            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
-					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-					vTaskDelay(xDelay);
-					state_light_off=0;
-					gpio_set_level(LIGHT_OFF_GPIO, state_light_off);
-            		ESP_LOGI(TAG, "state light off: %d", state_light_off);
-				} else {
-						printf("Cannot pulse due to state not being at 0");
-				}
-			}
-
-
-        }
-    }
-
-}
 
 void vTaskPolaris( void *pvParameters )
 {
@@ -502,12 +420,6 @@ void udp_client_task( void * pvParameters )
             break;
         }
 
-        // Set timeout
-        struct timeval timeout;
-        timeout.tv_sec = TIMEOUT_SOCKET_SEC;
-        timeout.tv_usec = TIMEOUT_SOCKET_USEC;
-        setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
-
         ESP_LOGI(TAG, "Client Socket created");
          
     	for ( ;; )
@@ -542,7 +454,7 @@ void app_main(void)
 {
 	init_wesp32_eth();
 	
-    xTaskCreate(udp_server_task, "UDP_SERVER", 4096, (void*)AF_INET, WATCH_PRIORITY, NULL);
+    xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, WATCH_PRIORITY, NULL);
 
 	configure_led();
 
@@ -550,9 +462,6 @@ void app_main(void)
 
     // creating semaphore
 	xSemaphore_gpio = xSemaphoreCreateBinary();
-	xSemaphore_force_on = xSemaphoreCreateBinary();
-	xSemaphore_force_off = xSemaphoreCreateBinary();
-	xSemaphore_pulse = xSemaphoreCreateBinary();
 	xSemaphore_send = xSemaphoreCreateBinary();
     xSemaphore_polaris = xSemaphoreCreateBinary();
     
@@ -569,45 +478,11 @@ void app_main(void)
         printf("semaphore did not create sucessfully\n");
 	}
 
-	if (xSemaphore_force_on !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskForceOn = NULL;
-		xTaskCreate(vTaskForceOn, "FORCE ON", 4096, NULL , FORCE_ON_PRIORITY , &xTaskForceOn);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-	}
-
-
-	if (xSemaphore_force_off !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskForceOff = NULL;
-		xTaskCreate(vTaskForceOff, "FORCE OFF", 4096, NULL , FORCE_OFF_PRIORITY , &xTaskForceOff);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-	}
-
-	if (xSemaphore_pulse !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskPulse = NULL;
-		xTaskCreate(vTaskPulse, "PULSE", 4096, NULL , PULSE_PRIORITY , &xTaskPulse);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-	}
-
     if (xSemaphore_polaris !=NULL)
     {
         // creating tasks and their handles
         TaskHandle_t xTaskPolaris = NULL;
-        xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
+        xTaskCreate(vTaskPolaris, "POLARIS", 1024, NULL , POLARIS_PRIORITY , &xTaskPolaris);
     }
     else
     {
@@ -618,7 +493,7 @@ void app_main(void)
     {
         // creating tasks and their handles  
         TaskHandle_t xTaskWatch = NULL;
-		xTaskCreate(vTaskWatch, "WATCH", 4096, NULL , WATCH_PRIORITY , &xTaskWatch);
+		xTaskCreate(vTaskWatch, "WATCH", 1024, NULL , WATCH_PRIORITY , &xTaskWatch);
 		xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , SEND_PRIORITY , NULL);
     }
     else
