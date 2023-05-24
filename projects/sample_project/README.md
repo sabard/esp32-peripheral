@@ -13,8 +13,7 @@ that copies the project to user specified path and set it's name. For more infor
 Make sure to clone submodules with:
 
 ```bash
-git submodule init
-git submodule update
+git submodule update --init --recursive
 ```
 
 TODO: figure out how to recursively clone
