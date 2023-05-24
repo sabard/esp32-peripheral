@@ -8,6 +8,33 @@
 This is the simplest buildable example. The example is used by command `idf.py create-project`
 that copies the project to user specified path and set it's name. For more information follow the [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project)
 
+## Setup
+
+Make sure to clone submodules with:
+
+```bash
+git submodule init
+git submodule update
+```
+
+TODO: figure out how to recursively clone
+
+Enable msgpack component with
+
+```bash
+idf.py reconfigure
+```
+
+TODO: Use component manager? https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/tools/idf-component-manager.html
+
+## Usage
+
+Build, flash and monitor!
+
+```bash
+export ESP_PORT=/dev/ttyUSB0 # set to correct port
+idf.py -p $ESP_PORT build flash monitor
+```
 
 
 ## How to use example
