@@ -20,6 +20,8 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_netif.h"
 #include "esp_eth.h"
@@ -42,21 +44,30 @@
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
-#define WATCH_PRIORITY (tskIDLE_PRIORITY+4)
-#define SEND_PRIORITY (tskIDLE_PRIORITY+5) 
-#define GPIO_PRIORITY  (tskIDLE_PRIORITY+5)
-#define POLARIS_PRIORITY  (tskIDLE_PRIORITY+5)
+// TODO make this programmatic?
+#define NUM_RESOURCES 4 // 3 GPIO, and polaris TX
+#define CLIENT_PRIORITY (tskIDLE_PRIORITY + 9)
+#define SERVER_PRIORITY (tskIDLE_PRIORITY + 10)
+#define GPIO_PRIORITY  (tskIDLE_PRIORITY + 5)
+#define POLARIS_PRIORITY (tskIDLE_PRIORITY + 4)
+#define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
+#define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
+#define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 #define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
+#define QUEUE_SIZE 10
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
+#define MAX_BUF_LEN 1500
 
 static const char *TAG = "eth_example";
 char input;
-int number;
-SemaphoreHandle_t xSemaphore_gpio = NULL;
-SemaphoreHandle_t xSemaphore_polaris = NULL;
-static int polaris_state;
-SemaphoreHandle_t xSemaphore_send = NULL;
 static const char *payload = "Message from ESP32 ";
+static QueueHandle_t gpio_queue = NULL;
+static QueueHandle_t polaris_queue = NULL;
+
+typedef struct {
+    char recbytes[1500];
+    int len;
+} Rx_buf;
 
 typedef struct {
     int gpio;
@@ -70,39 +81,35 @@ typedef struct {
     } *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
 } Op_gpio;
 
-Op_gpio *op;
-
-void parse_keys(char* keys[], msgpack_object_kv* map_ptr){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq 
+void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
     if (!strcmp(keys[0], "gpio")) { // if dict is a gpio operation
         op = malloc(sizeof(Op_gpio)); // creating/overwriting for new op dict
         op->gpio = map_ptr[0].val.via.i64;
 
         op->num_actions = map_ptr[1].val.via.array.size;
-        printf("There are %d actions\n", op->num_actions);
         for (int a = 0 ; a < op->num_actions; a++) {
 
             op->act_seq[a] = malloc(sizeof(struct module));
-            
+
             msgpack_object_str act_str_obj= map_ptr[1].val.via.array.ptr[a].via.map.ptr[0].val.via.str; // 1st index (1) is for act_seq, 2nd index (a) is for action number, 3rd index (0) is for what config of the action, in this case "action"
             op->act_seq[a]->action = (char*) malloc((act_str_obj.size+1)*sizeof(char));
-            
-            for (int l=0; l<act_str_obj.size; l++) { 
+
+            for (int l=0; l<act_str_obj.size; l++) {
                 op->act_seq[a]->action[l] = *(act_str_obj.ptr + l);
             }
             op->act_seq[a]->action[act_str_obj.size] = 0;
-            
+
             op->act_seq[a]->duration = map_ptr[1].val.via.array.ptr[a].via.map.ptr[1].val.via.i64;
             op->act_seq[a]->delay_pre = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
             op->act_seq[a]->delay_post = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
             op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[4].val.via.i64;
-            
+
         }
-        xSemaphoreGive( xSemaphore_gpio );
-    } 
+    }
 }
 
 
-void parse_object(msgpack_object obj) {
+void parse_object(msgpack_object obj, Op_gpio *op) {
     if (obj.type == 7) {  // if the deserialized data is dict/map
         uint32_t map_size = obj.via.map.size;
         msgpack_object_kv* map_ptr = obj.via.map.ptr; // pointer to msgpack_object_map
@@ -110,16 +117,15 @@ void parse_object(msgpack_object obj) {
         for (int n=0; n<map_size; n++) { // for each key/value pair in the dict, get the list of keys
             msgpack_object_str key_str_obj = map_ptr[n].key.via.str; // get msgpack_object_str
             int keysize = key_str_obj.size;
-            printf("keysize is %d\n", keysize);
             char* key_str = (char*) malloc((keysize+1)*sizeof(char));
-            for (int j=0; j<keysize; j++) { // extract out byte by byte the key bc strcpy doesn't work 
+            for (int j=0; j<keysize; j++) { // extract out byte by byte the key bc strcpy doesn't work
                 key_str[j] = *(key_str_obj.ptr+j);
             }
             key_str[keysize] = 0;
             keys[n] = key_str;
         }
 
-        parse_keys(keys, map_ptr);
+        parse_keys(keys, map_ptr, op);
 
     }
 
@@ -219,9 +225,8 @@ static void init_wesp32_eth()
 }
 
 
-static void udp_server_task(void *pvParameters)
-{
-    char recbytes[1500];
+static void udp_server_task(void *pvParameters) {
+    Rx_buf rx_buf;
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     struct sockaddr_in addr;
@@ -253,155 +258,137 @@ static void udp_server_task(void *pvParameters)
 
         while (1) {
             ESP_LOGI(TAG, "Waiting for data...");
-            int len = recvfrom(sock, recbytes, sizeof(recbytes), 0, (struct sockaddr *)&source_addr, &socklen);
+                rx_buf.len = recvfrom(sock, rx_buf.recbytes, sizeof(rx_buf.recbytes), 0, (struct sockaddr *)&source_addr, &socklen);
 			// Error occurred during receiving
-            if (len < 0) {
+            if (rx_buf.len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
-				ESP_LOGI(TAG, "Data received. Bytes recieved: %d", len);
-                if (strncmp(recbytes, "polaris_init", 12) == 0) {
-                    polaris_state = 0;
-                    xSemaphoreGive( xSemaphore_polaris );
-                }
-                else if (strncmp(recbytes, "polaris_read", 12) == 0) {
-                    polaris_state = 1;
-                    xSemaphoreGive( xSemaphore_polaris );
+				ESP_LOGI(TAG, "Received %d bytes.", rx_buf.len);
+
+                rx_buf.recbytes[rx_buf.len] = '\0'; // Null-terminate buffer
+                ESP_LOGI(TAG, "%s", rx_buf.recbytes);
+                if (strncmp(rx_buf.recbytes, "polaris", 7) == 0) {
+                    xQueueSend(polaris_queue, rx_buf.recbytes, portMAX_DELAY);
                 }
                 else {
-                    // Initalize unpacked object
-                    msgpack_unpacked und;
-                    msgpack_unpacked_init(&und);
-        
-                    //Unpack
-                    msgpack_unpack_return ret;
-                    ret = msgpack_unpack_next(&und, recbytes, len, NULL);
-                    if (ret == MSGPACK_UNPACK_SUCCESS) {
-                        msgpack_object object = und.data;
-                        msgpack_object_print(stdout, object);
-                        printf("\n");
-                        // Do stuff with unpacked object...
-                        parse_object(object);
-                    }
-                    else {
-                        printf("Error in unpacking");
-                    }
-                
-                    // Destroy unpacked object
-                    msgpack_unpacked_destroy(&und);
-
+                    xQueueSend(gpio_queue, &rx_buf, portMAX_DELAY);
                 }
-
             }
-       
-    
         }
-        
+
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
-        
     }
-
+    vTaskDelete(NULL);
 }
 
 
-void vTaskGPIO( void * pvParameters )
-{
-    for ( ;; )
-    {
-        if ( xSemaphoreTake( xSemaphore_gpio, portMAX_DELAY) == pdTRUE )
-        {
-            bool gpio_state = 0; 
-            for (int a = 0; a < op->num_actions; a++) { // for each action
+void vTaskGPIO(void * pvParameters) {
+    Op_gpio op;
+    Rx_buf rx_buf;
+
+    for (;;) {
+        if (xQueueReceive(gpio_queue, &rx_buf, portMAX_DELAY)) {
+            bool gpio_state = 0;
+            msgpack_unpacked und;
+
+            // Initalize unpacked object
+            msgpack_unpacked_init(&und);
+
+            //Unpack
+            msgpack_unpack_return ret;
+            ret = msgpack_unpack_next(&und, rx_buf.recbytes, rx_buf.len, NULL);
+            if (ret == MSGPACK_UNPACK_SUCCESS) {
+                msgpack_object object = und.data;
+                msgpack_object_print(stdout, object);
+                printf("\n");
+                // Do stuff with unpacked object...
+                parse_object(object, &op);
+            }
+            else {
+                printf("Error in unpacking");
+            }
+
+            // Destroy unpacked object
+            msgpack_unpacked_destroy(&und);
+
+            for (int a = 0; a < op.num_actions; a++) { // for each action
                 int repeat_counter = 0;
                 int repeat = 1;
                 while (repeat) {
 
                      // pre-delay
-                     if (op->act_seq[a]->delay_pre > 0) {
-                         printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre); 
-                         vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+                     if (op.act_seq[a]->delay_pre > 0) {
+                         printf("delaying before pulse for %d msec\n",op.act_seq[a]->delay_pre);
+                         vTaskDelay(op.act_seq[a]->delay_pre / portTICK_PERIOD_MS);
                      }
 
                      // action
-                     if (!strcmp(op->act_seq[a]->action, "up")) 
+                     if (!strcmp(op.act_seq[a]->action, "up"))
                          gpio_state = 1;
-                     else if (!strcmp(op->act_seq[a]->action, "down")) 
+                     else if (!strcmp(op.act_seq[a]->action, "down"))
                          gpio_state = 0;
-                     printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
-                     gpio_set_level(op->gpio, gpio_state); 
-                     if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state 
-                        vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);  
-                        gpio_set_level(op->gpio, !gpio_state);
+                     printf("setting gpio %d down for %d msec\n", op.gpio, op.act_seq[a]->duration);
+                     gpio_set_level(op.gpio, gpio_state);
+                     if (op.act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
+                        vTaskDelay(op.act_seq[a]->duration / portTICK_PERIOD_MS);
+                        gpio_set_level(op.gpio, !gpio_state);
                      }
 
 
                      // post-delay
-                     if (op->act_seq[a]->delay_post > 0) {
-                         printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post); 
-                         vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
+                     if (op.act_seq[a]->delay_post > 0) {
+                         printf("delaying after pulse for %d msec\n",op.act_seq[a]->delay_post);
+                         vTaskDelay(op.act_seq[a]->delay_post / portTICK_PERIOD_MS);
 
                      }
 
                      // check repeat
-                     if (op->act_seq[a]->repeat == 0) 
+                     if (op.act_seq[a]->repeat == 0)
                          repeat = 0;
-                     else if (op->act_seq[a]->repeat > 0) {
-                        if (repeat_counter == op->act_seq[a]->repeat) 
+                     else if (op.act_seq[a]->repeat > 0) {
+                        if (repeat_counter == op.act_seq[a]->repeat)
                             repeat = 0;
-                        else 
+                        else
                             repeat_counter++;
                      }
-                   
+
                 }
 
             }
-            
         }
     }
 
 }
 
 
-
-void vTaskPolaris( void *pvParameters )
-{
+void vTaskPolaris(void *pvParameters) {
+    char rx_buffer[13];
     char polaris_read_buf[256];
 
-    for ( ;; ) {
-        if ( xSemaphoreTake( xSemaphore_polaris, portMAX_DELAY) == pdTRUE ) {
-            if (polaris_state == 0) {
+    for (;;) {
+        if(xQueueReceive(polaris_queue, rx_buffer, portMAX_DELAY)) {
+            if (strcmp(rx_buffer, "polaris_init") == 0) {
                 polaris_send_init_seq();
             }
-            else if (polaris_state == 1) {
+            else if (strcmp(rx_buffer, "polaris_read") == 0) {
                 polaris_read(&polaris_read_buf);
+            }
+            else {
+                ESP_LOGE(TAG, "Unknown polaris command.");
             }
         }
     }
-}
-
-void vTaskWatch( void *pvParameters )
-{
-	for ( ;; )
-	{
-		input = getchar();
-		if (input == 'c')
-		{
-			xSemaphoreGive( xSemaphore_send );
-		}
-		vTaskDelay( 100 / portTICK_PERIOD_MS );
-	}
-
 }
 
 // UDP client task function
-void udp_client_task( void * pvParameters )
-{
+void udp_client_task( void * pvParameters ) {
     ESP_LOGI(TAG, "Client task started");
     int addr_family = 0;
     int ip_protocol = 0;
@@ -422,25 +409,25 @@ void udp_client_task( void * pvParameters )
 
         ESP_LOGI(TAG, "Client Socket created");
          
-    	for ( ;; )
-    	{
-    		if ( xSemaphoreTake( xSemaphore_send, portMAX_DELAY) == pdTRUE )
-    		{
-                int err = sendto(sock, payload, strlen(payload)+1, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    	for (;;) {
+    		input = getchar();
+            if (input == 'c') {
+                int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
                 if (err < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
                 }
-                ESP_LOGI(TAG, "Message sent");	
+                ESP_LOGI(TAG, "Message sent");
+    		    printf("end of loop -- send\n");
     		}
+            vTaskDelay( 100 / portTICK_PERIOD_MS );
     	}
 
     }
 	
 }
 
-static void configure_led(void)
-{
+static void configure_led(void) {
       gpio_reset_pin(JUICE_GPIO);
       gpio_set_direction(JUICE_GPIO, GPIO_MODE_OUTPUT);
       gpio_reset_pin(LIGHT_ON_GPIO);
@@ -454,50 +441,29 @@ void app_main(void)
 {
 	init_wesp32_eth();
 	
-    xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, WATCH_PRIORITY, NULL);
+    xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, SERVER_PRIORITY, NULL);
 
 	configure_led();
 
     polaris_setup_uart();
 
-    // creating semaphore
-	xSemaphore_gpio = xSemaphoreCreateBinary();
-	xSemaphore_send = xSemaphoreCreateBinary();
-    xSemaphore_polaris = xSemaphoreCreateBinary();
-    
-
-	if (xSemaphore_gpio !=NULL)
-    {
-        // creating tasks and their handles  
-		TaskHandle_t xTaskGPIO = NULL;
-		xTaskCreate(vTaskGPIO, "GPIO", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
-
+    // create event queues
+    if (!(gpio_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
+        ESP_LOGE(TAG, "Could not create GPIO queue.");
     }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-	}
-
-    if (xSemaphore_polaris !=NULL)
-    {
-        // creating tasks and their handles
-        TaskHandle_t xTaskPolaris = NULL;
-        xTaskCreate(vTaskPolaris, "POLARIS", 1024, NULL , POLARIS_PRIORITY , &xTaskPolaris);
-    }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
+    if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * 13))) {
+        ESP_LOGE(TAG, "Could not create GPIO queue.");
     }
 
-	if (xSemaphore_send !=NULL)
-    {
-        // creating tasks and their handles  
-        TaskHandle_t xTaskWatch = NULL;
-		xTaskCreate(vTaskWatch, "WATCH", 1024, NULL , WATCH_PRIORITY , &xTaskWatch);
-		xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , SEND_PRIORITY , NULL);
+    // create mutexes for multiple worker threads?
+    for (int i = 0; i < NUM_RESOURCES; i++) {
+
     }
-    else
-    {
-        printf("semaphore did not create sucessfully\n");
-	}
+
+    // create tasks and their handles
+	TaskHandle_t xTaskGPIO = NULL;
+	xTaskCreate(vTaskGPIO, "TOGGLE", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
+    TaskHandle_t xTaskPolaris = NULL;
+    xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
+	xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , CLIENT_PRIORITY , NULL);
 }

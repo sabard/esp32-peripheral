@@ -127,7 +127,7 @@ void polaris_send_init_seq(){
 
     // set larger capture volume
     uart_write("VSEL 1\r");
-    uart_read(read_buf, 100);
+    uart_read((char **)&read_buf, 100);
     printf("%s\n", read_buf);
 
     // enter tracking mode
