@@ -4,10 +4,48 @@ import msgpack
 
 port = 3333
 wesp_ip_address = "192.168.98.124" #"172.17.3.174" #"192.168.98.124"
-default_payload = {
-    "key": 1,
-    "another_key": "another_value",
+default_payload = {                     # gpio operation dict
+        "gpio": 4,                      # gpio pin to perform on
+        "action_seq": [                 # list of action module dicts
+                {
+                    "action": "up",     # up or down
+                    "duration": 100,    # in ms, -1 for keeping state up/down
+                    "delay_pre": -1,    # in ms, -1 for no delay before pulse
+                    "delay_post": -1,   # in ms, -1 for no delay after pulse
+                    "repeat": 1         # 0 for repeat 0 more times, 1 for repeat 1 more time, etc..
+                },
+                {
+                    "action": "down",
+                    "duration": 50,
+                    "delay_pre": 1000,
+                    "delay_post": -1,
+                    "repeat": 1 
+                },
+                {
+                    "action": "up",
+                    "duration": 100,
+                    "delay_pre": -1,
+                    "delay_post": -1,
+                    "repeat": 2
+                },
+                {
+                    "action": "down",
+                    "duration": 100,
+                    "delay_pre": -1,
+                    "delay_post": 500,
+                    "repeat": 3
+                },
+                {
+                    "action": "up",
+                    "duration": 100,
+                    "delay_pre": -1,
+                    "delay_post": -1,
+                    "repeat": 0
+                }
+
+        ],
 }
+
 
 
 # set up UDP server on lico
