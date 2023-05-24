@@ -1,3 +1,3 @@
 [submodule "projects/sample_project/components/esp-msgpack"]
 	path = projects/sample_project/components/esp-msgpack
-	url = https://github.com/typester/esp-msgpack.git
+	url = git@github.com:ejjun321/esp-msgpack.git
