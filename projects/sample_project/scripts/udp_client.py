@@ -13,7 +13,7 @@ default_payload = {                     # gpio operation dict
             "duration": 100,    # in ms, -1 for keeping state up/down
             "delay_pre": -1,    # in ms, -1 for no delay before pulse
             "delay_post": -1,   # in ms, -1 for no delay after pulse
-            "repeat": 1         # 0 for repeat 0 more times, 1 for repeat 1 more time, etc..
+            "repeat": 1         # 1 for play action once, 2 for play action twice, etc.
         },
         {
             "action": "down",
@@ -41,7 +41,7 @@ default_payload = {                     # gpio operation dict
             "duration": 100,
             "delay_pre": -1,
             "delay_post": -1,
-            "repeat": 0
+            "repeat": 1
         }
 
     ],

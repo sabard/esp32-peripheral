@@ -319,9 +319,7 @@ void vTaskGPIO(void * pvParameters) {
             msgpack_unpacked_destroy(&und);
 
             for (int a = 0; a < op.num_actions; a++) { // for each action
-                int repeat_counter = 0;
-                int repeat = 1;
-                while (repeat) {
+                for (int r = 0; r < op.act_seq[a]->repeat; r++) { // for each repeat
 
                      // pre-delay
                      if (op.act_seq[a]->delay_pre > 0) {
@@ -349,15 +347,6 @@ void vTaskGPIO(void * pvParameters) {
 
                      }
 
-                     // check repeat
-                     if (op.act_seq[a]->repeat == 0)
-                         repeat = 0;
-                     else if (op.act_seq[a]->repeat > 0) {
-                        if (repeat_counter == op.act_seq[a]->repeat)
-                            repeat = 0;
-                        else
-                            repeat_counter++;
-                     }
 
                 }
 
