@@ -319,33 +319,34 @@ void vTaskGPIO(void * pvParameters) {
             // Destroy unpacked object
             msgpack_unpacked_destroy(&und);
 
-            for (int a = 0; a < op.num_actions; a++) { // for each action
-                for (int r = 0; r < op.act_seq[a]->repeat; r++) { // for each repeat
-                // pre-delay
-                if (op->act_seq[a]->delay_pre > 0) {
-                 printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
-                 vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+            for (int a = 0; a < op->num_actions; a++) { // for each action
+                for (int r = 0; r < op->act_seq[a]->repeat; r++) { // for each repeat
+                    // pre-delay
+                    if (op->act_seq[a]->delay_pre > 0) {
+                     printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
+                     vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+                    }
+
+                    // action
+                    if (!strcmp(op->act_seq[a]->action, "up"))
+                     gpio_state = 1;
+                    else if (!strcmp(op->act_seq[a]->action, "down"))
+                     gpio_state = 0;
+                    printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
+                    gpio_set_level(op->gpio, gpio_state);
+                    if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
+                    vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
+                    gpio_set_level(op->gpio, !gpio_state);
+                    }
+
+
+                    // post-delay
+                    if (op->act_seq[a]->delay_post > 0) {
+                     printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
+                     vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
+                    }
+
                 }
-
-                // action
-                if (!strcmp(op->act_seq[a]->action, "up"))
-                 gpio_state = 1;
-                else if (!strcmp(op->act_seq[a]->action, "down"))
-                 gpio_state = 0;
-                printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
-                gpio_set_level(op->gpio, gpio_state);
-                if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
-                vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
-                gpio_set_level(op->gpio, !gpio_state);
-                }
-
-
-                // post-delay
-                if (op->act_seq[a]->delay_post > 0) {
-                 printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
-                 vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
-                }
-
             }
         }
     }
