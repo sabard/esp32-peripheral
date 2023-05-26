@@ -83,7 +83,6 @@ typedef struct {
 
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
     if (!strcmp(keys[0], "gpio")) { // if dict is a gpio operation
-        op = malloc(sizeof(Op_gpio)); // creating/overwriting for new op dict
         op->gpio = map_ptr[0].val.via.i64;
 
         op->num_actions = map_ptr[1].val.via.array.size;
@@ -290,8 +289,10 @@ static void udp_server_task(void *pvParameters) {
 
 
 void vTaskGPIO(void * pvParameters) {
-    Op_gpio op;
+    Op_gpio *op;
     Rx_buf rx_buf;
+
+    op = malloc(sizeof(Op_gpio));
 
     for (;;) {
         if (xQueueReceive(gpio_queue, &rx_buf, portMAX_DELAY)) {
@@ -309,7 +310,7 @@ void vTaskGPIO(void * pvParameters) {
                 msgpack_object_print(stdout, object);
                 printf("\n");
                 // Do stuff with unpacked object...
-                parse_object(object, &op);
+                parse_object(object, op);
             }
             else {
                 printf("Error in unpacking");
@@ -320,39 +321,36 @@ void vTaskGPIO(void * pvParameters) {
 
             for (int a = 0; a < op.num_actions; a++) { // for each action
                 for (int r = 0; r < op.act_seq[a]->repeat; r++) { // for each repeat
+                // pre-delay
+                if (op->act_seq[a]->delay_pre > 0) {
+                 printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
+                 vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+                }
 
-                     // pre-delay
-                     if (op.act_seq[a]->delay_pre > 0) {
-                         printf("delaying before pulse for %d msec\n",op.act_seq[a]->delay_pre);
-                         vTaskDelay(op.act_seq[a]->delay_pre / portTICK_PERIOD_MS);
-                     }
-
-                     // action
-                     if (!strcmp(op.act_seq[a]->action, "up"))
-                         gpio_state = 1;
-                     else if (!strcmp(op.act_seq[a]->action, "down"))
-                         gpio_state = 0;
-                     printf("setting gpio %d down for %d msec\n", op.gpio, op.act_seq[a]->duration);
-                     gpio_set_level(op.gpio, gpio_state);
-                     if (op.act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
-                        vTaskDelay(op.act_seq[a]->duration / portTICK_PERIOD_MS);
-                        gpio_set_level(op.gpio, !gpio_state);
-                     }
-
-
-                     // post-delay
-                     if (op.act_seq[a]->delay_post > 0) {
-                         printf("delaying after pulse for %d msec\n",op.act_seq[a]->delay_post);
-                         vTaskDelay(op.act_seq[a]->delay_post / portTICK_PERIOD_MS);
-
-                     }
+                // action
+                if (!strcmp(op->act_seq[a]->action, "up"))
+                 gpio_state = 1;
+                else if (!strcmp(op->act_seq[a]->action, "down"))
+                 gpio_state = 0;
+                printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
+                gpio_set_level(op->gpio, gpio_state);
+                if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
+                vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
+                gpio_set_level(op->gpio, !gpio_state);
+                }
 
 
+                // post-delay
+                if (op->act_seq[a]->delay_post > 0) {
+                 printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
+                 vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
                 }
 
             }
         }
     }
+
+    free(op);
 
 }
 
@@ -367,7 +365,7 @@ void vTaskPolaris(void *pvParameters) {
                 polaris_send_init_seq();
             }
             else if (strcmp(rx_buffer, "polaris_read") == 0) {
-                polaris_read(&polaris_read_buf);
+                polaris_read(polaris_read_buf);
             }
             else {
                 ESP_LOGE(TAG, "Unknown polaris command.");
