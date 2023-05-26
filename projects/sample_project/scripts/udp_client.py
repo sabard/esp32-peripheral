@@ -4,7 +4,10 @@ import msgpack
 import sys
 
 port = 3333
-wesp_ip_address = sys.argv[1] or "192.168.98.124"
+if len(sys.argv) > 1:
+    wesp_ip_address = sys.argv[1]
+else: 
+    wesp_ip_address = "192.168.98.124"
 default_payload = {                     # gpio operation dict
     "gpio": 4,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts

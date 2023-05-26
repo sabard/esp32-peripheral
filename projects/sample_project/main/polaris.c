@@ -49,16 +49,16 @@ void uart_write(const char* str) {
      uart_write_bytes(UART_NUM, (const char*)str, strlen(str));
 }
 
-void uart_read(char** buf, int length) {
-    uart_read_bytes(UART_NUM, *buf, length, 1000);
+void uart_read(char* buf, int length) {
+    uart_read_bytes(UART_NUM, buf, length, 1000);
 }
 
-void uart_read_until(char** buf, const char* str) {
+void uart_read_until(char* buf, const char* str) {
     int str_len = strlen(str);
     do {
-        uart_read_bytes(UART_NUM, *buf, 1, 1000);
-        *buf += 1;
-    } while (strncmp(*buf - str_len, str, str_len));
+        uart_read_bytes(UART_NUM, buf, 1, 1000);
+        buf += 1;
+    } while (strncmp(buf - str_len, str, str_len));
 }
 
 void polaris_send_init_seq(){
@@ -73,25 +73,24 @@ void polaris_send_init_seq(){
     uart_break("BEEP 1\r", 100);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-
     // reset Polaris to intial state
     uart_write("RESET 0\r");
     vTaskDelay(5000 / portTICK_PERIOD_MS);
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
-
+    
     // sanity beep
     uart_write("BEEP 1\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // initialze
     uart_write("INIT \r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     uart_write("PHRQ *********1****\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // load dummy tool file
@@ -107,52 +106,59 @@ void polaris_send_init_seq(){
     uart_write("PVWR 010240090000004E4449000000000000000000383730303234380000000000000000000000000009010101000000000000000000000000000000000001010100000000\r");
     uart_write("PVWR 01028000000000000000000000000000800029000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\r");
     uart_write("PVWR 0102C000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // initial tool port
     uart_write("PINIT 01\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // start tool port
     uart_write("PENA 01S\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // turn on IR illuminators
     uart_write("IRATE 2\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // set larger capture volume
     uart_write("VSEL 1\r");
-    uart_read((char **)&read_buf, 100);
+    uart_read((char *)read_buf, 100);
     printf("%s\n", read_buf);
 
     // enter tracking mode
     uart_write("TSTART \r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
 
     // set serial port speed to 115200
     uart_write("COMM 50001\r");
-    uart_read_until((char **)&read_buf, "\r");
+    uart_read_until((char *)read_buf, "\r");
     printf("%s\n", read_buf);
+ 
+    ESP_LOGI(TAG, "POLARIS INIT END");
 }
 
-void polaris_read(char **read_buf) {
-     int reply_len;
+void polaris_read(char *read_buf) {
+    unsigned short reply_len;
+    
+    ESP_LOGI(TAG, "POLARIS READ");
 
     uart_write("BX 1000\r");
 
     // read header
     uart_read(read_buf, 4);
-    read_buf += 4;
 
     // TODO read reply_len correctly
-    reply_len = 100;
+    reply_len = *(unsigned short *)(read_buf+2);
+    printf("%hu\n", reply_len);
+    read_buf += 4;
 
     // TODO should this be plus??
     uart_read(read_buf, reply_len - 4);
+
+    ESP_LOGI(TAG, "POLARIS READ END");
 }
