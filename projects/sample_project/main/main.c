@@ -319,7 +319,10 @@ void vTaskGPIO(void * pvParameters) {
             msgpack_unpacked_destroy(&und);
 
             for (int a = 0; a < op.num_actions; a++) { // for each action
-                for (int r = 0; r < op.act_seq[a]->repeat; r++) { // for each repeat
+                int repeat_counter = 0;
+                int repeat = 1;
+                printf("repeat is %d", op.act_seq[a]->repeat);
+                while(repeat) { // for each repeat
 
                      // pre-delay
                      if (op.act_seq[a]->delay_pre > 0) {
@@ -346,9 +349,16 @@ void vTaskGPIO(void * pvParameters) {
                          vTaskDelay(op.act_seq[a]->delay_post / portTICK_PERIOD_MS);
 
                      }
+                        
+                     // check repeat
+                     repeat_counter++;
+                     if (repeat_counter == op.act_seq[a]->repeat) {
+                         repeat = 0;
+                     }
 
 
                 }
+                printf("debug 1");
 
             }
         }
