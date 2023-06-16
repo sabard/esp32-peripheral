@@ -57,10 +57,11 @@
 #define QUEUE_SIZE 10
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 #define MAX_BUF_LEN 1500
+#define POLARIS_CMD_MAX_LEN 15
 
 static const char *TAG = "eth_example";
 char input;
-static const char *payload = "Message from ESP32 ";
+static QueueHandle_t udp_client_queue = NULL;
 static QueueHandle_t gpio_queue = NULL;
 static QueueHandle_t polaris_queue = NULL;
 
@@ -182,42 +183,42 @@ static void example_set_static_ip(esp_netif_t *netif)
 /** setting PHY config and connections and installing ethernet driver and connecting to tcp/ip stack  */
 static void init_wesp32_eth()
 {
-	// Initialize mac config to default
+    // Initialize mac config to default
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_config.smi_mdc_gpio_num = 16;
-	emac_config.smi_mdio_gpio_num = 17;
-	esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    emac_config.smi_mdio_gpio_num = 17;
+    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
 
-	// Initialize phy config to default
-  	eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
- 	phy_config.phy_addr = 0;
- 	phy_config.reset_gpio_num = -1;
-	esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
+    // Initialize phy config to default
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = 0;
+    phy_config.reset_gpio_num = -1;
+    esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
 
-	// Initialize TCP/IP network interface (should be called only once in application)
-	ESP_ERROR_CHECK(esp_netif_init());
+    // Initialize TCP/IP network interface (should be called only once in application)
+    ESP_ERROR_CHECK(esp_netif_init());
     // Create default event loop that running in background
-	ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // Create new default instance of esp-netif for Ethernet
-	esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
-	esp_netif_t* eth_netif = esp_netif_new(&netif_config);
+    esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
+    esp_netif_t* eth_netif = esp_netif_new(&netif_config);
 
-	esp_eth_handle_t eth_handle = NULL;
-	esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
-	ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
+    esp_eth_handle_t eth_handle = NULL;
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
 
-	esp_eth_netif_glue_handle_t eth_driver_handle =
-						esp_eth_new_netif_glue(eth_handle);
-    /* attach Ethernet driver to TCP/IP stack */	
-	ESP_ERROR_CHECK(esp_netif_attach(eth_netif, eth_driver_handle));
-    
-	// Register user defined event handers
+    esp_eth_netif_glue_handle_t eth_driver_handle =
+                        esp_eth_new_netif_glue(eth_handle);
+    /* attach Ethernet driver to TCP/IP stack */
+    ESP_ERROR_CHECK(esp_netif_attach(eth_netif, eth_driver_handle));
+
+    // Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
 
     // Set a static ip address for wesp32
-	example_set_static_ip(eth_netif);
+    example_set_static_ip(eth_netif);
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
@@ -233,7 +234,7 @@ static void udp_server_task(void *pvParameters) {
 
     while (1) {
 
-        addr.sin_addr.s_addr =inet_addr(STATIC_IP_ADDR);  // htonl(INADDR_ANY);  
+        addr.sin_addr.s_addr =inet_addr(STATIC_IP_ADDR);  // htonl(INADDR_ANY);
         addr.sin_family = AF_INET;
         addr.sin_port = htons(PORT);
         ip_protocol = IPPROTO_IP;
@@ -257,15 +258,18 @@ static void udp_server_task(void *pvParameters) {
 
         while (1) {
             ESP_LOGI(TAG, "Waiting for data...");
-                rx_buf.len = recvfrom(sock, rx_buf.recbytes, sizeof(rx_buf.recbytes), 0, (struct sockaddr *)&source_addr, &socklen);
-			// Error occurred during receiving
+            rx_buf.len = recvfrom(
+                sock, rx_buf.recbytes, sizeof(rx_buf.recbytes), 0,
+                (struct sockaddr *)&source_addr, &socklen
+            );
+            // Error occurred during receiving
             if (rx_buf.len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
-				ESP_LOGI(TAG, "Received %d bytes.", rx_buf.len);
+                ESP_LOGI(TAG, "Received %d bytes.", rx_buf.len);
 
                 rx_buf.recbytes[rx_buf.len] = '\0'; // Null-terminate buffer
                 ESP_LOGI(TAG, "%s", rx_buf.recbytes);
@@ -370,16 +374,43 @@ void vTaskGPIO(void * pvParameters) {
 
 
 void vTaskPolaris(void *pvParameters) {
-    char rx_buffer[13];
-    char polaris_read_buf[256];
+    char rx_buffer[POLARIS_CMD_MAX_LEN];
+    char *polaris_read_buf;
+    Polaris_frame frame;
+    polaris_read_buf = malloc(32768);
+    int streaming = 0;
 
     for (;;) {
-        if(xQueueReceive(polaris_queue, rx_buffer, portMAX_DELAY)) {
-            if (strcmp(rx_buffer, "polaris_init") == 0) {
-                polaris_send_init_seq();
+        if(streaming || xQueueReceive(polaris_queue, rx_buffer, portMAX_DELAY)) {
+            if (streaming) {
+                polaris_read(&frame, polaris_read_buf);
+                xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
+                if (strlen(rx_buffer) == 0) {
+                    continue;
+                }
             }
-            else if (strcmp(rx_buffer, "polaris_read") == 0) {
-                polaris_read(polaris_read_buf);
+
+            if (strcmp(rx_buffer, "polaris_init") == 0) {
+                streaming = 0;
+
+                // initialize polaris with correct baud rates
+                polaris_set_baudrate(9600); // in case of re-init
+                polaris_send_init_seq(polaris_read_buf);
+                polaris_set_baudrate(115200);
+
+                // read and send frame as ACK
+                polaris_read(&frame, polaris_read_buf);
+                xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
+
+                rx_buffer[0] = '\0';
+            }
+            else if (strcmp(rx_buffer, "polaris_stream") == 0) {
+                streaming = 1;
+                rx_buffer[0] = '\0';
+            }
+            else if (strcmp(rx_buffer, "polaris_down") == 0) {
+                streaming = 0;
+                rx_buffer[0] = '\0';
             }
             else {
                 ESP_LOGE(TAG, "Unknown polaris command.");
@@ -393,67 +424,66 @@ void udp_client_task( void * pvParameters ) {
     ESP_LOGI(TAG, "Client task started");
     int addr_family = 0;
     int ip_protocol = 0;
+    int sock;
+    struct sockaddr_in dest_addr;
 
-    while (1) {
-        struct sockaddr_in dest_addr;
-        dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(PORT);
-        addr_family = AF_INET;
-        ip_protocol = IPPROTO_IP;
+    Polaris_frame polaris_frame;
 
-        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
-        if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-            break;
-        }
-
-        ESP_LOGI(TAG, "Client Socket created");
-         
-    	for (;;) {
-    		input = getchar();
-            if (input == 'c') {
-                int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                if (err < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                    break;
-                }
-                ESP_LOGI(TAG, "Message sent");
-    		    printf("end of loop -- send\n");
-    		}
-            vTaskDelay( 100 / portTICK_PERIOD_MS );
-    	}
-
+    dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(PORT);
+    addr_family = AF_INET;
+    ip_protocol = IPPROTO_IP;
+    sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        return;
     }
-	
+
+    ESP_LOGI(TAG, "Client Socket created");
+
+    for (;;) {
+        if (xQueueReceive(udp_client_queue, &polaris_frame, portMAX_DELAY)) {
+            int err = sendto(
+                sock, &polaris_frame, 16, 0,
+                (struct sockaddr *)&dest_addr, sizeof(dest_addr)
+            );
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                return;
+            }
+            ESP_LOGI(TAG, "Polaris frame sent.");
+        }
+    }
 }
 
 static void configure_led(void) {
-      gpio_reset_pin(JUICE_GPIO);
-      gpio_set_direction(JUICE_GPIO, GPIO_MODE_OUTPUT);
-      gpio_reset_pin(LIGHT_ON_GPIO);
-      gpio_set_direction(LIGHT_ON_GPIO, GPIO_MODE_OUTPUT);
-      gpio_reset_pin(LIGHT_OFF_GPIO);
-      gpio_set_direction(LIGHT_OFF_GPIO, GPIO_MODE_OUTPUT);
-
+    gpio_reset_pin(JUICE_GPIO);
+    gpio_set_direction(JUICE_GPIO, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(LIGHT_ON_GPIO);
+    gpio_set_direction(LIGHT_ON_GPIO, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(LIGHT_OFF_GPIO);
+    gpio_set_direction(LIGHT_OFF_GPIO, GPIO_MODE_OUTPUT);
 }
 
-void app_main(void)
-{
-	init_wesp32_eth();
-	
+void app_main(void) {
+    init_wesp32_eth();
+
     xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, SERVER_PRIORITY, NULL);
 
-	configure_led();
+    configure_led();
 
-    polaris_setup_uart();
+    polaris_setup_uart(9600);
 
     // create event queues
+    if (!(udp_client_queue = xQueueCreate(QUEUE_SIZE, sizeof(Polaris_frame)))) {
+        ESP_LOGE(TAG, "Could not create UDP client queue.");
+    }
     if (!(gpio_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
         ESP_LOGE(TAG, "Could not create GPIO queue.");
     }
-    if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * 13))) {
-        ESP_LOGE(TAG, "Could not create GPIO queue.");
+    if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * POLARIS_CMD_MAX_LEN))) {
+        ESP_LOGE(TAG, "Could not create polaris queue.");
     }
 
     // create mutexes for multiple worker threads?
@@ -462,9 +492,9 @@ void app_main(void)
     }
 
     // create tasks and their handles
-	TaskHandle_t xTaskGPIO = NULL;
-	xTaskCreate(vTaskGPIO, "TOGGLE", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
+    TaskHandle_t xTaskGPIO = NULL;
+    xTaskCreate(vTaskGPIO, "TOGGLE", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
     TaskHandle_t xTaskPolaris = NULL;
     xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
-	xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , CLIENT_PRIORITY , NULL);
+    xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , CLIENT_PRIORITY , NULL);
 }
