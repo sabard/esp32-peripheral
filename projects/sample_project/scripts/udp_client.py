@@ -4,7 +4,10 @@ import msgpack
 import sys
 
 port = 3333
-wesp_ip_address = sys.argv[1] or "192.168.98.124"
+if len(sys.argv) > 1:
+    wesp_ip_address = sys.argv[1] 
+else:
+    wesp_ip_address = "192.168.98.124"
 default_payload = {                     # gpio operation dict
     "gpio": 4,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
@@ -90,8 +93,10 @@ def main():
         if key == "1":
             payload = "polaris_init".encode()
         elif key == "2":
-            payload = "polaris_read".encode()
+            payload = "polaris_stream".encode()
         elif key == "3":
+            payload = "polaris_down".encode()
+        elif key == "4":
             payload = msgpack.packb(default_payload, use_bin_type=True)
         else:
             payload = key.encode()

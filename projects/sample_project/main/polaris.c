@@ -180,8 +180,6 @@ void polaris_send_init_seq(char *read_buf){
 void polaris_read(Polaris_frame *frame, char *read_buf) {
     unsigned short reply_len;
     unsigned short header_id;
-    
-    ESP_LOGI(TAG, "POLARIS READ");
 
     uart_write("BX 1000\r");
 
@@ -190,8 +188,8 @@ void polaris_read(Polaris_frame *frame, char *read_buf) {
 
     while(!(read_buf[0] == 0xc4 && read_buf[1] == 0xa5)) {
         // should be 0xc4a5
-        printf("%02x ", *read_buf);
-        printf("%02x\n", *(read_buf+1));
+        // printf("%02x ", *read_buf);
+        // printf("%02x\n", *(read_buf+1));
 
         uart_write("BX 1000\r");
 
@@ -219,7 +217,4 @@ void polaris_read(Polaris_frame *frame, char *read_buf) {
         "num_markers: %d, mx: %f, my: %f, mz: %f \n",
         frame->num_markers, frame->mx, frame->my, frame->mz
     );
-
-
-    ESP_LOGI(TAG, "POLARIS READ END");
 }

@@ -379,10 +379,10 @@ void vTaskPolaris(void *pvParameters) {
     Polaris_frame frame;
     polaris_read_buf = malloc(32768);
     int streaming = 0;
+    TickType_t delay = portMAX_DELAY;
 
     for (;;) {
-        if(streaming || xQueueReceive(polaris_queue, rx_buffer, portMAX_DELAY)) {
-            if (streaming) {
+        if(xQueueReceive(polaris_queue, rx_buffer, delay) || streaming) {            if (streaming) {
                 polaris_read(&frame, polaris_read_buf);
                 xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
                 if (strlen(rx_buffer) == 0) {
@@ -403,14 +403,19 @@ void vTaskPolaris(void *pvParameters) {
                 xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
 
                 rx_buffer[0] = '\0';
+                ESP_LOGI(TAG, "polaris state: init");
             }
             else if (strcmp(rx_buffer, "polaris_stream") == 0) {
                 streaming = 1;
+                delay = 0;
                 rx_buffer[0] = '\0';
+                ESP_LOGI(TAG, "polaris state: stream");
             }
             else if (strcmp(rx_buffer, "polaris_down") == 0) {
                 streaming = 0;
+                delay = portMAX_DELAY;
                 rx_buffer[0] = '\0';
+                ESP_LOGI(TAG, "polaris state: down");
             }
             else {
                 ESP_LOGE(TAG, "Unknown polaris command.");
@@ -452,7 +457,7 @@ void udp_client_task( void * pvParameters ) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 return;
             }
-            ESP_LOGI(TAG, "Polaris frame sent.");
+            // ESP_LOGI(TAG, "Polaris frame sent.");
         }
     }
 }
