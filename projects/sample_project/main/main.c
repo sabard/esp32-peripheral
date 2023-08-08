@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
@@ -38,6 +39,9 @@
 
 #include "polaris.h"
 
+#include <stdint.h>
+
+
 #define PORT CONFIG_EXAMPLE_PORT
 #define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
 #define STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
@@ -48,6 +52,7 @@
 #define NUM_RESOURCES 4 // 3 GPIO, and polaris TX
 #define CLIENT_PRIORITY (tskIDLE_PRIORITY + 9)
 #define SERVER_PRIORITY (tskIDLE_PRIORITY + 10)
+#define KILL_PRIORITY  (tskIDLE_PRIORITY + 3)
 #define GPIO_PRIORITY  (tskIDLE_PRIORITY + 5)
 #define POLARIS_PRIORITY (tskIDLE_PRIORITY + 4)
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
@@ -58,9 +63,19 @@
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 #define MAX_BUF_LEN 1500
 #define POLARIS_CMD_MAX_LEN 15
+#define CONFIG_FREERTOS_HZ 1000
 
 static const char *TAG = "eth_example";
 char input;
+
+int64_t esp_timer_get_time(void); //esp_timer_get_time() returns the time in microseconds
+
+//TimerHandle_t tmr_up_pre;
+//TimerHandle_t tmr_up;
+//TimerHandle_t tmr_up_post;
+TimerHandle_t upTimers[3];
+
+static QueueHandle_t kill_queue = NULL;
 static QueueHandle_t udp_client_queue = NULL;
 static QueueHandle_t gpio_queue = NULL;
 static QueueHandle_t polaris_queue = NULL;
@@ -73,20 +88,30 @@ typedef struct {
 typedef struct {
     int gpio;
     int num_actions;
+    int tasknum;
     struct module {
         char* action;
         int duration;
         int delay_pre;
         int delay_post;
-        int repeat;
+        int64_t repeat;
     } *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
 } Op_gpio;
 
+int killtasknum = 0;
+
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
-    if (!strcmp(keys[0], "gpio")) { // if dict is a gpio operation
-        op->gpio = map_ptr[0].val.via.i64;
+    ESP_LOGI(TAG, "%s",keys[0]);
+	
+    if (strstr(keys[0], "gpio")!=0) { // if first entry in dict is a gpio pin
+        ESP_LOGI(TAG, "gpio task detected");
+
+	op->gpio = map_ptr[0].val.via.i64;
 
         op->num_actions = map_ptr[1].val.via.array.size;
+	
+	op->tasknum = map_ptr[2].val.via.array.size;
+
         for (int a = 0 ; a < op->num_actions; a++) {
 
             op->act_seq[a] = malloc(sizeof(struct module));
@@ -102,10 +127,12 @@ void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the 
             op->act_seq[a]->duration = map_ptr[1].val.via.array.ptr[a].via.map.ptr[1].val.via.i64;
             op->act_seq[a]->delay_pre = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
             op->act_seq[a]->delay_post = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
-            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[4].val.via.i64;
-
-        }
+            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[4].val.via.i64;		
+	}
+	
+    
     }
+
 }
 
 
@@ -131,6 +158,39 @@ void parse_object(msgpack_object obj, Op_gpio *op) {
 
 }
 
+void parse_keys_kill(char* keys[], msgpack_object_kv* map_ptr){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
+    ESP_LOGI(TAG, "%s",keys[0]);
+	
+    
+    if (strstr(keys[0],"killtasknum")!=0){ // if dict is a kill operation
+	ESP_LOGI(TAG, "kill task detected");
+	killtasknum = map_ptr[0].val.via.i64;
+	ESP_LOGI(TAG, "killtasknum set to %d", killtasknum);
+	   }
+}
+
+
+void parse_object_kill(msgpack_object obj) {
+    if (obj.type == 7) {  // if the deserialized data is dict/map
+        uint32_t map_size = obj.via.map.size;
+        msgpack_object_kv* map_ptr = obj.via.map.ptr; // pointer to msgpack_object_map
+        char* keys[map_size];
+        for (int n=0; n<map_size; n++) { // for each key/value pair in the dict, get the list of keys
+            msgpack_object_str key_str_obj = map_ptr[n].key.via.str; // get msgpack_object_str
+            int keysize = key_str_obj.size;
+            char* key_str = (char*) malloc((keysize+1)*sizeof(char));
+            for (int j=0; j<keysize; j++) { // extract out byte by byte the key bc strcpy doesn't work
+                key_str[j] = *(key_str_obj.ptr+j);
+            }
+            key_str[keysize] = 0;
+            keys[n] = key_str;
+        }
+
+        parse_keys_kill(keys, map_ptr);
+
+    }
+
+}
 
 /* Event handler for Ethernet events */
 static void eth_event_handler(void *arg, esp_event_base_t event_base,
@@ -272,13 +332,21 @@ static void udp_server_task(void *pvParameters) {
                 ESP_LOGI(TAG, "Received %d bytes.", rx_buf.len);
 
                 rx_buf.recbytes[rx_buf.len] = '\0'; // Null-terminate buffer
+                
                 ESP_LOGI(TAG, "%s", rx_buf.recbytes);
-                if (strncmp(rx_buf.recbytes, "polaris", 7) == 0) {
+		
+		if (strncmp(rx_buf.recbytes, "polaris", 7) == 0) {
                     xQueueSend(polaris_queue, rx_buf.recbytes, portMAX_DELAY);
-                }
-                else {
+		}
+		else if(strstr(rx_buf.recbytes,"gpio")!= NULL){
                     xQueueSend(gpio_queue, &rx_buf, portMAX_DELAY);
+		    ESP_LOGI(TAG, "added to gpio queue");
                 }
+		else if(strstr(rx_buf.recbytes,"killtasknum")!= NULL) {
+		    xQueueSend(kill_queue, &rx_buf, portMAX_DELAY);
+		    ESP_LOGI(TAG, "added to kill queue");
+
+		}
             }
         }
 
@@ -291,21 +359,68 @@ static void udp_server_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
+void tmr_up_pre_callback(TimerHandle_t xTimer){
+	int gpio;
+	//int timerdata;
+	gpio = (int) pvTimerGetTimerID(xTimer);
+	//printf("timerdata pulled from id: %d \n",timerdata);
+	gpio_set_level(gpio,1);
+
+	if (xTimerStart(upTimers[1],0) != pdPASS){
+		printf("Up Timer not started!");
+	}	
+}
+
+void tmr_up_callback(TimerHandle_t xTimer){
+	int gpio;
+	//int timerdata;
+	gpio = (int) pvTimerGetTimerID(upTimers[0]);
+	//gpio = timerdata[0];
+	gpio_set_level(gpio,0);
+
+	if(xTimerStart(upTimers[2],0) != pdPASS){
+		printf("Post Delay Timer not started!");
+	}
+}
+
+void tmr_up_post_callback(TimerHandle_t xTimer){
+	static int repeat_count = 0;
+	repeat_count++;
+	
+	int repeat = (int) pvTimerGetTimerID(xTimer); 
+
+	int tasknum = (int) pvTimerGetTimerID(upTimers[1]);
+
+	if (repeat_count == repeat || tasknum == killtasknum){
+		xTimerStop(upTimers[0],0);
+		killtasknum = 0;
+		repeat_count = 0;
+	}
+	else{
+		vTimerSetTimerID(xTimer,(void *) repeat_count);
+	}
+}
+
+void createUpTimers(int gpio, int predelay, int duration, int postdelay, int repeat, int tasknum ){
+	int totalcycletime = predelay + duration + postdelay;
+	
+	//int timerdata[3] = {gpio,tasknum,repeat};
+	//printf("timerdata: %n \n",timerdata);
+
+	upTimers[0] = xTimerCreate("TimerUpPre",pdMS_TO_TICKS(totalcycletime),pdTRUE,(void * )gpio,tmr_up_pre_callback);
+	upTimers[1] = xTimerCreate("TimerUp",pdMS_TO_TICKS(duration),pdFALSE,(void *)tasknum,tmr_up_callback);
+	upTimers[2] = xTimerCreate("TimerUpPost",pdMS_TO_TICKS(postdelay),pdFALSE, (void *)repeat ,tmr_up_post_callback);
+}
 
 void vTaskGPIO(void * pvParameters) {
     Op_gpio *op;
     Rx_buf rx_buf;
-
     op = malloc(sizeof(Op_gpio));
-
     for (;;) {
         if (xQueueReceive(gpio_queue, &rx_buf, portMAX_DELAY)) {
-            bool gpio_state = 0;
             msgpack_unpacked und;
-
             // Initalize unpacked object
             msgpack_unpacked_init(&und);
-
             //Unpack
             msgpack_unpack_return ret;
             ret = msgpack_unpack_next(&und, rx_buf.recbytes, rx_buf.len, NULL);
@@ -323,55 +438,60 @@ void vTaskGPIO(void * pvParameters) {
             // Destroy unpacked object
             msgpack_unpacked_destroy(&und);
 
-            for (int a = 0; a < op->num_actions; a++) { // for each action
-                int repeat_counter = 0;
-                int repeat = 1;
-                printf("repeat is %d", op->act_seq[a]->repeat);
-                while(repeat) { // for each repeat
-                    
-                    // pre-delay
-                    if (op->act_seq[a]->delay_pre > 0) {
-                      printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
-                      vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
-                    }
+	    for (int a = 0; a < op->num_actions; a++) { // for each action
+                printf("freeRTOS tick length: %ld \n",portTICK_PERIOD_MS);
+		
+		int gpio = op->gpio;
+		int repeat = op->act_seq[a]->repeat;
+		int delay_pre = op->act_seq[a]->delay_pre;
+		int duration = op->act_seq[a]->duration;
+		int delay_post = op->act_seq[a]->delay_post;
+		int tasknum = op->tasknum;
 
-                    // action
-                    if (!strcmp(op->act_seq[a]->action, "up")){
-                        gpio_state = 1;
-                        printf("setting gpio %d up for %d msec\n", op->gpio, op->act_seq[a]->duration);
-                    }
-                    else if (!strcmp(op->act_seq[a]->action, "down")) {
-                        gpio_state = 0;
-                        printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
-                    }
-                    gpio_set_level(op->gpio, gpio_state);
-                    if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
-                        vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
-                        gpio_set_level(op->gpio, !gpio_state);
-                    }
+		// if given up action:
+		if (!strcmp(op->act_seq[a]->action,"up")){
+			createUpTimers(gpio,delay_pre,duration,delay_post,repeat,tasknum);
+			if(xTimerStart(upTimers[0],0)!= pdPASS){
+				printf("Pre Delay Timer not initiated!");
+			}
+		}
 
-                     // post-delay
-                     if (op->act_seq[a]->delay_post > 0) {
-                         printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
-                         vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
-
-                     }
-                        
-                     // check repeat
-                     repeat_counter++;
-                     if (repeat_counter == op->act_seq[a]->repeat) {
-                         repeat = 0;
-                     }
-
-                }
             }
         }
     }
-
     free(op);
-
 }
+		
+void vTaskKill(void * pvParameters) {
+    Rx_buf rx_buf;
+    
+    for (;;) {
+        if (xQueueReceive(kill_queue, &rx_buf, portMAX_DELAY)) {
+            msgpack_unpacked und;
 
+            // Initalize unpacked object
+            msgpack_unpacked_init(&und);
+            
+	    //Unpack
+            msgpack_unpack_return ret;
+            ret = msgpack_unpack_next(&und, rx_buf.recbytes, rx_buf.len, NULL);
+            
+	    if (ret == MSGPACK_UNPACK_SUCCESS) {
+                msgpack_object object = und.data;
+                msgpack_object_print(stdout, object);
+                printf("\n");
+                // Do stuff with unpacked object...
+                parse_object_kill(object);
+            }
+            else {
+                printf("Error in unpacking");
+            }
+
+            // Destroy unpacked object
+            msgpack_unpacked_destroy(&und);
+        }
+    }
+}	
 
 void vTaskPolaris(void *pvParameters) {
     char rx_buffer[POLARIS_CMD_MAX_LEN];
@@ -469,6 +589,8 @@ static void configure_led(void) {
 void app_main(void) {
     init_wesp32_eth();
 
+    printf("Timer: %lld us\n", esp_timer_get_time());
+
     xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, SERVER_PRIORITY, NULL);
 
     configure_led();
@@ -482,6 +604,11 @@ void app_main(void) {
     if (!(gpio_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
         ESP_LOGE(TAG, "Could not create GPIO queue.");
     }
+
+    if (!(kill_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
+        ESP_LOGE(TAG, "Could not create kill queue.");
+    }
+ 
     if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * POLARIS_CMD_MAX_LEN))) {
         ESP_LOGE(TAG, "Could not create polaris queue.");
     }
@@ -490,11 +617,17 @@ void app_main(void) {
     for (int i = 0; i < NUM_RESOURCES; i++) {
 
     }
+      
 
     // create tasks and their handles
     TaskHandle_t xTaskGPIO = NULL;
     xTaskCreate(vTaskGPIO, "TOGGLE", 4096, NULL , GPIO_PRIORITY , &xTaskGPIO);
+    
+    TaskHandle_t xTaskKill = NULL;
+    xTaskCreate(vTaskKill, "KILL", 4096, NULL , KILL_PRIORITY , &xTaskKill);
+    
     TaskHandle_t xTaskPolaris = NULL;
     xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
+    
     xTaskCreate(udp_client_task, "UDP_CLIENT", 4096, (void*)AF_INET , CLIENT_PRIORITY , NULL);
 }
