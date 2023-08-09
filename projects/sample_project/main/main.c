@@ -66,14 +66,7 @@
 #define CONFIG_FREERTOS_HZ 1000
 
 static const char *TAG = "eth_example";
-//		if(xTimerStart(upTimers[0],0) != pdPASS){
-//			printf("Pre Delay Timer not started!");
-//		}
 char input;
-
-int64_t esp_timer_get_time(void); //esp_timer_get_time() returns the time in microseconds
-
-TimerHandle_t upTimers[3];
 
 static QueueHandle_t kill_queue = NULL;
 static QueueHandle_t udp_client_queue = NULL;
@@ -359,59 +352,6 @@ static void udp_server_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
-void tmr_up_pre_callback(TimerHandle_t xTimer){
-	int gpio;
-	//int timerdata;
-	gpio = (int) pvTimerGetTimerID(xTimer);
-	//printf("timerdata pulled from id: %d \n",timerdata);
-	gpio_set_level(gpio,1);
-
-	if (xTimerStart(upTimers[1],0) != pdPASS){
-		printf("Up Timer not started!");
-	}	
-}
-
-void tmr_up_callback(TimerHandle_t xTimer){
-	int gpio;
-	//int timerdata;
-	gpio = (int) pvTimerGetTimerID(upTimers[0]);
-	//gpio = timerdata[0];
-	gpio_set_level(gpio,0);
-
-	if(xTimerStart(upTimers[2],0) != pdPASS){
-		printf("Post Delay Timer not started!");
-	}
-}
-
-void tmr_up_post_callback(TimerHandle_t xTimer){
-	static int repeat_count = 0;
-	repeat_count++;
-	
-	int repeat = (int) pvTimerGetTimerID(xTimer); 
-
-	int tasknum = (int) pvTimerGetTimerID(upTimers[1]);
-
-	if (repeat_count == repeat || tasknum == killtasknum){
-		xTimerStop(upTimers[0],0);
-		killtasknum = 0;
-		repeat_count = 0;
-	}
-	else{
-		vTimerSetTimerID(xTimer,(void *) repeat_count);
-	}
-}
-
-void createUpTimers(int gpio, int predelay, int duration, int postdelay, int repeat, int tasknum ){
-	int totalcycletime = predelay + duration + postdelay;
-	
-	//int timerdata[3] = {gpio,tasknum,repeat};
-	//printf("timerdata: %n \n",timerdata);
-
-	upTimers[0] = xTimerCreate("TimerUpPre",pdMS_TO_TICKS(totalcycletime),pdTRUE,(void * )gpio,tmr_up_pre_callback);
-	upTimers[1] = xTimerCreate("TimerUp",pdMS_TO_TICKS(duration),pdFALSE,(void *)tasknum,tmr_up_callback);
-	upTimers[2] = xTimerCreate("TimerUpPost",pdMS_TO_TICKS(postdelay),pdFALSE, (void *)repeat ,tmr_up_post_callback);
-}
-
 void vTaskGPIO(void * pvParameters) {
     Op_gpio *op;
     Rx_buf rx_buf;
@@ -450,10 +390,6 @@ void vTaskGPIO(void * pvParameters) {
 
 		// if given up action:
 		if (!strcmp(op->act_seq[a]->action,"up")){
-			createUpTimers(gpio,delay_pre,duration,delay_post,repeat,tasknum);
-			if(xTimerStart(upTimers[0],0)!= pdPASS){
-				printf("Pre Delay Timer not initiated!");
-			}
 		}
 
             }
