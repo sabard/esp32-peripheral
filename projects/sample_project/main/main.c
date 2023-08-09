@@ -66,13 +66,13 @@
 #define CONFIG_FREERTOS_HZ 1000
 
 static const char *TAG = "eth_example";
+//		if(xTimerStart(upTimers[0],0) != pdPASS){
+//			printf("Pre Delay Timer not started!");
+//		}
 char input;
 
 int64_t esp_timer_get_time(void); //esp_timer_get_time() returns the time in microseconds
 
-//TimerHandle_t tmr_up_pre;
-//TimerHandle_t tmr_up;
-//TimerHandle_t tmr_up_post;
 TimerHandle_t upTimers[3];
 
 static QueueHandle_t kill_queue = NULL;
