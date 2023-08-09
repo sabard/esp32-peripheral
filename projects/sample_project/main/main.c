@@ -41,6 +41,8 @@
 
 #include <stdint.h>
 
+#include "driver/ledc.h"
+#include "esp_err.h"
 
 #define PORT CONFIG_EXAMPLE_PORT
 #define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
@@ -58,7 +60,7 @@
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
-#define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
+#define HOS T_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
 #define QUEUE_SIZE 10
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 #define MAX_BUF_LEN 1500
@@ -158,6 +160,7 @@ void parse_keys_kill(char* keys[], msgpack_object_kv* map_ptr){  // the key orde
     if (strstr(keys[0],"killtasknum")!=0){ // if dict is a kill operation
 	ESP_LOGI(TAG, "kill task detected");
 	killtasknum = map_ptr[0].val.via.i64;
+	ESP_ERROR_CHECK(ledc_stop(&ledc_channel));
 	ESP_LOGI(TAG, "killtasknum set to %d", killtasknum);
 	   }
 }
@@ -387,9 +390,33 @@ void vTaskGPIO(void * pvParameters) {
 		int duration = op->act_seq[a]->duration;
 		int delay_post = op->act_seq[a]->delay_post;
 		int tasknum = op->tasknum;
+		int totalcycletime = delay_pre + duration + delay_post;
+
+		int freq = 1000/totalcycletime; //milliseconds to Hz
+		int duty = duration/totalcycletime; //as a fraction
 
 		// if given up action:
 		if (!strcmp(op->act_seq[a]->action,"up")){
+			ledc_timer_config_t ledc_timer = {
+    				.speed_mode = LEDC_LOW_SPEED_MODE,
+    				.timer_num  = LEDC_TIMER_0,
+    				.duty_resolution = LEDC_TIMER_13_BIT,
+    				.freq_hz = freq,
+    				.clk_cfg = LEDC_AUTO_CLK
+			};
+
+			ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+			static ledc_channel_config_t ledc_channel = {
+        			.speed_mode     = LEDC_LOW_SPEED_MODE,
+        			.channel        = LEDC_CHANNEL_0,
+        			.timer_sel      = LEDC_TIMER_0,
+        			.intr_type      = LEDC_INTR_DISABLE,
+        			.gpio_num       = gpio,
+        			.duty           = 4095, //duty * ((2**13)-1)
+        			.hpoint         = 0
+    			};
+    			ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 		}
 
             }
@@ -446,6 +473,10 @@ void vTaskPolaris(void *pvParameters) {
                 }
             }
 
+			createUpTimers(gpio,delay_pre,duration,delay_post,repeat,tasknum);
+			if(xTimerStart(upTimers[0],0)!= pdPASS){
+				printf("Pre Delay Timer not initiated!");
+			}
             if (strcmp(rx_buffer, "polaris_init") == 0) {
                 streaming = 0;
 
