@@ -60,7 +60,7 @@
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
-#define HOS T_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
+#define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
 #define QUEUE_SIZE 10
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 #define MAX_BUF_LEN 1500
@@ -94,6 +94,28 @@ typedef struct {
 } Op_gpio;
 
 int killtasknum = 0;
+
+static void ledc_init(void){
+	ledc_timer_config_t ledc_timer = {
+		.speed_mode = LEDC_LOW_SPEED_MODE,
+		.timer_num  = LEDC_TIMER_0,
+		.duty_resolution = LEDC_TIMER_13_BIT,
+		.freq_hz = 500,
+		.clk_cfg = LEDC_AUTO_CLK
+	};
+	ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+	
+	ledc_channel_config_t ledc_channel = {
+		.speed_mode     = LEDC_LOW_SPEED_MODE,
+		.channel        = LEDC_CHANNEL_0,
+		.timer_sel      = LEDC_TIMER_0,
+		.intr_type      = LEDC_INTR_DISABLE,
+		.gpio_num       = 5,
+		.duty           = 4095, //duty * ((2**13)-1), default set to 50%
+		.hpoint         = 0 //high mode counter
+	};
+	ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+}
 
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
     ESP_LOGI(TAG, "%s",keys[0]);
@@ -160,7 +182,7 @@ void parse_keys_kill(char* keys[], msgpack_object_kv* map_ptr){  // the key orde
     if (strstr(keys[0],"killtasknum")!=0){ // if dict is a kill operation
 	ESP_LOGI(TAG, "kill task detected");
 	killtasknum = map_ptr[0].val.via.i64;
-	ESP_ERROR_CHECK(ledc_stop(&ledc_channel));
+	ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,0));
 	ESP_LOGI(TAG, "killtasknum set to %d", killtasknum);
 	   }
 }
@@ -360,7 +382,7 @@ void vTaskGPIO(void * pvParameters) {
     Rx_buf rx_buf;
     op = malloc(sizeof(Op_gpio));
     for (;;) {
-        if (xQueueReceive(gpio_queue, &rx_buf, portMAX_DELAY)) {
+	if (xQueueReceive(gpio_queue, &rx_buf, portMAX_DELAY)) {
             msgpack_unpacked und;
             // Initalize unpacked object
             msgpack_unpacked_init(&und);
@@ -393,30 +415,20 @@ void vTaskGPIO(void * pvParameters) {
 		int totalcycletime = delay_pre + duration + delay_post;
 
 		int freq = 1000/totalcycletime; //milliseconds to Hz
-		int duty = duration/totalcycletime; //as a fraction
+		int duty = (8192*duration)/totalcycletime - 1;
 
 		// if given up action:
 		if (!strcmp(op->act_seq[a]->action,"up")){
-			ledc_timer_config_t ledc_timer = {
-    				.speed_mode = LEDC_LOW_SPEED_MODE,
-    				.timer_num  = LEDC_TIMER_0,
-    				.duty_resolution = LEDC_TIMER_13_BIT,
-    				.freq_hz = freq,
-    				.clk_cfg = LEDC_AUTO_CLK
-			};
+			printf("duty is %d \n", duty);
 
-			ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-
-			static ledc_channel_config_t ledc_channel = {
-        			.speed_mode     = LEDC_LOW_SPEED_MODE,
-        			.channel        = LEDC_CHANNEL_0,
-        			.timer_sel      = LEDC_TIMER_0,
-        			.intr_type      = LEDC_INTR_DISABLE,
-        			.gpio_num       = gpio,
-        			.duty           = 4095, //duty * ((2**13)-1)
-        			.hpoint         = 0
-    			};
-    			ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+			ledc_init();
+			ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty));
+			ESP_ERROR_CHECK(ledc_set_pin(gpio,LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
+			ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,freq));
+			if (repeat > 0) {
+				ESP_ERROR_CHECK(ledc_set_duty_with_hpoint(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty,repeat));
+			}
+			ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
 		}
 
             }
@@ -472,11 +484,6 @@ void vTaskPolaris(void *pvParameters) {
                     continue;
                 }
             }
-
-			createUpTimers(gpio,delay_pre,duration,delay_post,repeat,tasknum);
-			if(xTimerStart(upTimers[0],0)!= pdPASS){
-				printf("Pre Delay Timer not initiated!");
-			}
             if (strcmp(rx_buffer, "polaris_init") == 0) {
                 streaming = 0;
 
@@ -555,8 +562,6 @@ static void configure_led(void) {
 
 void app_main(void) {
     init_wesp32_eth();
-
-    printf("Timer: %lld us\n", esp_timer_get_time());
 
     xTaskCreate(udp_server_task, "UDP_SERVER", 8192, (void*)AF_INET, SERVER_PRIORITY, NULL);
 
