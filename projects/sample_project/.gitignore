@@ -1,4 +1,4 @@
-sdkconfig*
+sdkconfig.old
 .python-version
 build/
 .__afs
