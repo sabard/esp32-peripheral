@@ -100,7 +100,7 @@ static void ledc_init(void){
 		.speed_mode = LEDC_LOW_SPEED_MODE,
 		.timer_num  = LEDC_TIMER_0,
 		.duty_resolution = LEDC_TIMER_13_BIT,
-		.freq_hz = 500,
+		.freq_hz = 1,
 		.clk_cfg = LEDC_AUTO_CLK
 	};
 	ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
@@ -420,11 +420,21 @@ void vTaskGPIO(void * pvParameters) {
 		// if given up action:
 		if (!strcmp(op->act_seq[a]->action,"up")){
 			printf("duty is %d \n", duty);
+			printf("freq is %d \n",freq);
+			
+
+			printf("currently hard-coded to low freq \n");
 
 			ledc_init();
-			ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty));
+			
+			//ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty));
+			ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,4095));
+			
 			ESP_ERROR_CHECK(ledc_set_pin(gpio,LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
-			ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,freq));
+			
+			//ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,freq));
+			ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,1));
+			
 			if (repeat > 0) {
 				ESP_ERROR_CHECK(ledc_set_duty_with_hpoint(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty,repeat));
 			}
