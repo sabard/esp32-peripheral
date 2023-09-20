@@ -28,8 +28,6 @@ static uint8_t s_led_state=0;
 static int inactive_tasks[N_BLINK_TASKS];
 QueueHandle_t task_queue[N_BLINK_TASKS];
 static int avail_task = -1;
-typedef void (*task_type)(void *); // declare a type of definition as a pointer to a function that takes in no arguments and returns nothing
-task_type task_array[N_BLINK_TASKS]; // make an array of pointers to tasks or functions  
 int task_index;
 int t;
 
@@ -52,7 +50,7 @@ void vTaskWatch( void *pvParameters )
                 printf(" ,%d, ", inactive_tasks[task_index]);
             }
             printf("\n");
-            printf("\n%d\n", avail_task);
+            printf("\n next available task using: %d\n", avail_task);
 
             if (avail_task < 0) {
                 ESP_LOGE(TAG, "There are no more avail tasks to run");
@@ -106,28 +104,14 @@ static void configure_led(void)
 void app_main(void)
 {
 	configure_led();
-    for (t=0; t<N_BLINK_TASKS; t++) { // for each task pointer
-        task_array[t] = &vTaskBlink;
-        //memcpy(task_array[i], &vTaskBlink, sizeof(&vTaskBlink));
-    }
                 
-	// creating tasks and their handles  
-	//TaskHandle_t xTaskBlink = NULL;
-	TaskHandle_t xTaskWatch = NULL;
-	//xTaskCreate(vTaskBlink, "BLINK", 4096, NULL , BLINK_PRIORITY , &xTaskBlink);
-	xTaskCreate(vTaskWatch, "WATCH", 4096, NULL, WATCH_PRIORITY, &xTaskWatch);
-    printf("\n debug 1 \n");
+	xTaskCreate(vTaskWatch, "WATCH", 4096, NULL, WATCH_PRIORITY, NULL);
     for (t=0; t<N_BLINK_TASKS; t++) { // for each task in the blink task array
-        printf("\n debug 2 \n");
         inactive_tasks[t] = t; //initialize list of inactive tasks
-        printf("\n debug 3 \n");
         if (!(task_queue[t] = xQueueCreate(QUEUE_SIZE, sizeof(t)))) {
                 printf("Could not create queue.");
         }
-        printf("\n debug 4 \n");
-
         xTaskCreate(vTaskBlink, NULL, 4096, &t, BLINK_PRIORITY, NULL);
-        printf("\n debug 5 \n");
     
     }
 	
