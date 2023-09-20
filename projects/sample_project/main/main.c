@@ -1,21 +1,37 @@
-// controlling the LED by pressing 'c' on the keyboard with binary semaphores
+// orchestration of multiple instances of the same task (task array) happpening in parallel contrlled by 'c'
+
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
+#include "driver/gpio.h"
+#include "sdkconfig.h"
+#include "freertos/queue.h"
+#include "esp_log.h"
+#include "freertos/event_groups.h"
+#include "esp_system.h"
+#include "esp_event.h"
 #include "driver/gpio.h"
 #include "sdkconfig.h"
 
 #define BLINK_GPIO 2
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY+2)
 #define WATCH_PRIORITY (tskIDLE_PRIORITY+1)
-#define N_BLINK_TASKS 3
+#define N_BLINK_TASKS 10
+#define QUEUE_SIZE 10
 
+
+static const char *TAG = "example";
 char input;
 int number;
 static uint8_t s_led_state=0;
-SemaphoreHandle_t xSemaphore = NULL;
+static int inactive_tasks[N_BLINK_TASKS];
+QueueHandle_t task_queue[N_BLINK_TASKS];
+static int avail_task = -1;
+typedef void (*task_type)(void *); // declare a type of definition as a pointer to a function that takes in no arguments and returns nothing
+task_type task_array[N_BLINK_TASKS]; // make an array of pointers to tasks or functions  
+int task_index;
+int t;
 
 void vTaskWatch( void *pvParameters )
 {
@@ -24,33 +40,60 @@ void vTaskWatch( void *pvParameters )
 		input = getchar();
 		if (input == 'c')
 		{
-			xSemaphoreGive( xSemaphore );
+            avail_task = -1;
+            for (task_index=0; task_index<N_BLINK_TASKS; task_index++) { // what is the next avail free-floating task 
+                if (inactive_tasks[task_index] >= 0) { // if this task index is an inactive task
+                    avail_task = task_index;
+                }
+            }
+            
+            printf("\n");
+            for (task_index=0; task_index<N_BLINK_TASKS; task_index++) {  
+                printf(" ,%d, ", inactive_tasks[task_index]);
+            }
+            printf("\n");
+            printf("\n%d\n", avail_task);
+
+            if (avail_task < 0) {
+                ESP_LOGE(TAG, "There are no more avail tasks to run");
+            }
+            else {
+			    xQueueSend( task_queue[avail_task], &avail_task, portMAX_DELAY );
+            }
 		}
 		vTaskDelay( 10 / portTICK_PERIOD_MS );
 	}
 
 }
 
-
-void vTaskBlink( void *pvParameters )
-{
-	for ( ;; )
-	{
-		if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
-		{
-			printf("LED SWITCH ON\n");
+void blink(int t) {
+            inactive_tasks[t] = -1;// take it off the inactive task array
+            s_led_state = 1;
+			printf("TASK %d is turning LED SWITCH ON\n",t);
 		    vTaskDelay( 2000 / portTICK_PERIOD_MS );
-			s_led_state=!s_led_state;
-            printf("LED SWITCH OFF\n");
-			
-		}
-	}
-	
+			s_led_state=0;
+            printf("TASK %d is turning LED SWITCH OFF\n",t);
+            inactive_tasks[t] = t; // take it back on the inactive task array
 }
 
-typedef void (*task_type)(void *); // declare a type of definition as a pointer to a function that takes in no arguments and returns nothing
-task_type task_array[N_BLINK_TASKS]; // make an array of pointers to tasks or functions  
-int i;
+void vTaskBlink( void *pvParameters ) // it's as if these are all the same one task but it's just recalled again and again to kick off the function mulitple times with different inputs
+{
+    vTaskSetThreadLocalStoragePointer(NULL, 0, (void *) t); // keep the memory of the task's task index since t itself is a global variable that is shared and changes
+    int index = (int) pvTaskGetThreadLocalStoragePointer(NULL, 0);
+    for ( ;; )
+	{
+		if ( xQueueReceive( task_queue[index], &index, portMAX_DELAY) == pdTRUE )  
+		{  
+            printf("\nTASK %d ACTIVATED\n", index);
+            //printf("INDEX IS %d AT THE START\n", index);
+            blink(index);	
+            //printf("INDEX IS %d AT THE END\n", index);
+            printf("TASK %d DEACTIVATED\n", index);
+		}
+	}
+
+}
+
 
 
 static void configure_led(void)
@@ -61,48 +104,31 @@ static void configure_led(void)
 
 
 void app_main(void)
-{	
+{
 	configure_led();
-	
-	// creating semaphore
-	xSemaphore = xSemaphoreCreateBinary();
-    for (int i=0; i<N_BLINK_TASKS; i++) { // for each task pointer
-        task_array[i] = &vTaskBlink;
-        printf("\n %p \n", &vTaskBlink);
-        int x = sizeof(&vTaskBlink);
-        printf("\n %d \n", x);
+    for (t=0; t<N_BLINK_TASKS; t++) { // for each task pointer
+        task_array[t] = &vTaskBlink;
         //memcpy(task_array[i], &vTaskBlink, sizeof(&vTaskBlink));
-                
-        //void (*task_array[i])(void *pvParameters) { // declare the value of the ith task pointer as a void with the routines below
-        //	for ( ;; ) {
-        //		if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
-        //		{
-        //			printf("LED SWITCH ON\n");
-        //		    vTaskDelay( 2000 / portTICK_PERIOD_MS );
-        //			s_led_state=!s_led_state;
-        //            printf("LED SWITCH OFF\n");
-        //			
-        //		}
-        //	}
-        //    
-        //}
     }
-
-	if (xSemaphore !=NULL)
-	{
-		// creating tasks and their handles  
-		//TaskHandle_t xTaskBlink = NULL;
-		TaskHandle_t xTaskWatch = NULL;
-		//xTaskCreate(vTaskBlink, "BLINK", 4096, NULL , BLINK_PRIORITY , &xTaskBlink);
-		xTaskCreate(vTaskWatch, "WATCH", 4096, NULL, WATCH_PRIORITY, &xTaskWatch);
-
-        for (int i=0; i<N_BLINK_TASKS; i++) { // for each task in the blink task array
-            xTaskCreate(*task_array[i], NULL, 4096, NULL, BLINK_PRIORITY, NULL);
+                
+	// creating tasks and their handles  
+	//TaskHandle_t xTaskBlink = NULL;
+	TaskHandle_t xTaskWatch = NULL;
+	//xTaskCreate(vTaskBlink, "BLINK", 4096, NULL , BLINK_PRIORITY , &xTaskBlink);
+	xTaskCreate(vTaskWatch, "WATCH", 4096, NULL, WATCH_PRIORITY, &xTaskWatch);
+    printf("\n debug 1 \n");
+    for (t=0; t<N_BLINK_TASKS; t++) { // for each task in the blink task array
+        printf("\n debug 2 \n");
+        inactive_tasks[t] = t; //initialize list of inactive tasks
+        printf("\n debug 3 \n");
+        if (!(task_queue[t] = xQueueCreate(QUEUE_SIZE, sizeof(t)))) {
+                printf("Could not create queue.");
         }
-	}
-	else
-	{
-		printf("semaphore did not create sucessfully\n");
-	}
+        printf("\n debug 4 \n");
+
+        xTaskCreate(vTaskBlink, NULL, 4096, &t, BLINK_PRIORITY, NULL);
+        printf("\n debug 5 \n");
+    
+    }
 	
 }
