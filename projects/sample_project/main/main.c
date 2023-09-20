@@ -1,5 +1,6 @@
 // controlling the LED by pressing 'c' on the keyboard with binary semaphores
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -67,8 +68,8 @@ void app_main(void)
 	// creating semaphore
 	xSemaphore = xSemaphoreCreateBinary();
     for (int i=0; i<N_BLINK_TASKS; i++) { // for each task pointer
-        task_array[i] = &vTaskBlink;
-        //memcpy(vTaskBlink, *task_array[i], sizeof(*task_array[i]);
+        //task_array[i] = &vTaskBlink;
+        memcpy(&vTaskBlink, task_array[i], sizeof(*task_array[i]));
                 
         //void (*task_array[i])(void *pvParameters) { // declare the value of the ith task pointer as a void with the routines below
         //	for ( ;; ) {
