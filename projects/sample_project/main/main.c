@@ -48,24 +48,9 @@ void vTaskWatch( void *pvParameters )
 //	
 //}
 
-typedef void (*task_type)(void); // declare a type of definition as a pointer to a function that takes in no arguments and returns nothing
+typedef void (*task_type)(void *); // declare a type of definition as a pointer to a function that takes in no arguments and returns nothing
 task_type task_array[N_BLINK_TASKS]; // make an array of pointers to tasks or functions  
 int i;
-for (int i=0; i<N_BLINK_TASKS; i++) { // for each task pointer
-    void (*task_array[i])(void) { // declare the value of the ith task pointer as a void with the routines below
-    	for ( ;; ) {
-    		if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
-    		{
-    			printf("LED SWITCH ON\n");
-    		    vTaskDelay( 2000 / portTICK_PERIOD_MS );
-    			s_led_state=!s_led_state;
-                printf("LED SWITCH OFF\n");
-    			
-    		}
-    	}
-        
-    }
-}
 
 
 static void configure_led(void)
@@ -81,6 +66,21 @@ void app_main(void)
 	
 	// creating semaphore
 	xSemaphore = xSemaphoreCreateBinary();
+for (int i=0; i<3; i++) { // for each task pointer
+    void (*task_array[i])(void *pvParameters) { // declare the value of the ith task pointer as a void with the routines below
+    	for ( ;; ) {
+    		if ( xSemaphoreTake( xSemaphore, portMAX_DELAY) == pdTRUE )
+    		{
+    			printf("LED SWITCH ON\n");
+    		    vTaskDelay( 2000 / portTICK_PERIOD_MS );
+    			s_led_state=!s_led_state;
+                printf("LED SWITCH OFF\n");
+    			
+    		}
+    	}
+        
+    }
+}
 
 	if (xSemaphore !=NULL)
 	{
