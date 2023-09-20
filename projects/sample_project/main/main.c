@@ -26,7 +26,6 @@ void vTaskWatch( void *pvParameters )
 		{
 			xSemaphoreGive( xSemaphore );
 		}
-		//printf("end of for loop -- watch\n");
 		vTaskDelay( 10 / portTICK_PERIOD_MS );
 	}
 
@@ -68,8 +67,11 @@ void app_main(void)
 	// creating semaphore
 	xSemaphore = xSemaphoreCreateBinary();
     for (int i=0; i<N_BLINK_TASKS; i++) { // for each task pointer
-        //task_array[i] = &vTaskBlink;
-        memcpy(&vTaskBlink, task_array[i], sizeof(*task_array[i]));
+        task_array[i] = &vTaskBlink;
+        printf("\n %p \n", &vTaskBlink);
+        int x = sizeof(&vTaskBlink);
+        printf("\n %d \n", x);
+        //memcpy(task_array[i], &vTaskBlink, sizeof(&vTaskBlink));
                 
         //void (*task_array[i])(void *pvParameters) { // declare the value of the ith task pointer as a void with the routines below
         //	for ( ;; ) {
