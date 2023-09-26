@@ -55,6 +55,7 @@
 #define CLIENT_PRIORITY (tskIDLE_PRIORITY + 9)
 #define SERVER_PRIORITY (tskIDLE_PRIORITY + 10)
 #define KILL_PRIORITY  (tskIDLE_PRIORITY + 3)
+#define LEDC_PRIORITY (tskIDLE_PRIORITY + 4)
 #define GPIO_PRIORITY  (tskIDLE_PRIORITY + 5)
 #define POLARIS_PRIORITY (tskIDLE_PRIORITY + 4)
 #define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
@@ -76,6 +77,7 @@ int task_index;
 int t;
 
 static QueueHandle_t kill_queue = NULL;
+static QueueHandle_t ledc_queue = NULL;
 static QueueHandle_t udp_client_queue = NULL;
 static QueueHandle_t gpio_queue[N_GPIO_TASKS];
 static QueueHandle_t polaris_queue = NULL;
@@ -94,18 +96,26 @@ typedef struct {
         int duration;
         int delay_pre;
         int delay_post;
-        int64_t repeat;
+        int repeat;
     } *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
 } Op_gpio;
 
+typedef struct {
+    int gpio;
+    int freq;
+    int duty;
+    int tasknum;
+} Op_ledc;
+
 int killtasknum = 0;
+int ledctask = 0;
 
 static void ledc_init(void){
 	ledc_timer_config_t ledc_timer = {
 		.speed_mode = LEDC_LOW_SPEED_MODE,
 		.timer_num  = LEDC_TIMER_0,
 		.duty_resolution = LEDC_TIMER_13_BIT,
-		.freq_hz = 500,
+		.freq_hz = 1,
 		.clk_cfg = LEDC_AUTO_CLK
 	};
 	ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
@@ -122,6 +132,8 @@ static void ledc_init(void){
 	ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 }
 
+
+// parse the keys for a custom square wave task
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
     ESP_LOGI(TAG, "%s",keys[0]);
 	
@@ -132,7 +144,8 @@ void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the 
 
         op->num_actions = map_ptr[1].val.via.array.size;
 	
-	op->tasknum = map_ptr[2].val.via.array.size;
+	op->tasknum = map_ptr[2].val.via.i64;
+	ESP_LOGI(TAG, "task number = %d",op->tasknum);
 
         for (int a = 0 ; a < op->num_actions; a++) {
 
@@ -157,7 +170,7 @@ void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the 
 
 }
 
-
+// parse the object for a custom square wave task
 void parse_object(msgpack_object obj, Op_gpio *op) {
     if (obj.type == 7) {  // if the deserialized data is dict/map
         uint32_t map_size = obj.via.map.size;
@@ -180,6 +193,47 @@ void parse_object(msgpack_object obj, Op_gpio *op) {
 
 }
 
+// parse the keys for a ledc task
+void parse_keys_ledc(char* keys[], msgpack_object_kv* map_ptr, Op_ledc *op){
+    ESP_LOGI(TAG, "%s",keys[0]);
+	
+    if (strstr(keys[0], "ledc")!=0) { // if first entry in dict is a gpio pin
+        ESP_LOGI(TAG, "ledc task detected");
+
+	op->gpio = map_ptr[0].val.via.i64;
+
+	ledctask = map_ptr[3].val.via.i64;
+
+        op->freq = map_ptr[1].val.via.i64;
+	
+        op->duty = map_ptr[2].val.via.i64;
+    
+    }
+}
+
+// parse the object for a ledc task
+void parse_object_ledc(msgpack_object obj, Op_ledc *op){
+    if (obj.type == 7) {  // if the deserialized data is dict/map
+        uint32_t map_size = obj.via.map.size;
+        msgpack_object_kv* map_ptr = obj.via.map.ptr; // pointer to msgpack_object_map
+        char* keys[map_size];
+        for (int n=0; n<map_size; n++) { // for each key/value pair in the dict, get the list of keys
+            msgpack_object_str key_str_obj = map_ptr[n].key.via.str; // get msgpack_object_str
+            int keysize = key_str_obj.size;
+            char* key_str = (char*) malloc((keysize+1)*sizeof(char));
+            for (int j=0; j<keysize; j++) { // extract out byte by byte the key bc strcpy doesn't work
+                key_str[j] = *(key_str_obj.ptr+j);
+            }
+            key_str[keysize] = 0;
+            keys[n] = key_str;
+        }
+
+        parse_keys_ledc(keys, map_ptr, op);
+
+    }
+}
+
+// parse the keys for a kill task
 void parse_keys_kill(char* keys[], msgpack_object_kv* map_ptr){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
     ESP_LOGI(TAG, "%s",keys[0]);
 	
@@ -187,12 +241,15 @@ void parse_keys_kill(char* keys[], msgpack_object_kv* map_ptr){  // the key orde
     if (strstr(keys[0],"killtasknum")!=0){ // if dict is a kill operation
 	ESP_LOGI(TAG, "kill task detected");
 	killtasknum = map_ptr[0].val.via.i64;
-	ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,0));
+	if (killtasknum == ledctask) {
+		ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,0));
+		killtasknum = 0;
+	}
 	ESP_LOGI(TAG, "killtasknum set to %d", killtasknum);
 	   }
 }
 
-
+// parse the object for a kill task
 void parse_object_kill(msgpack_object obj) {
     if (obj.type == 7) {  // if the deserialized data is dict/map
         uint32_t map_size = obj.via.map.size;
@@ -358,6 +415,7 @@ static void udp_server_task(void *pvParameters) {
                 
                 ESP_LOGI(TAG, "%s", rx_buf.recbytes);
 		
+
         		if (strncmp(rx_buf.recbytes, "polaris", 7) == 0) {
                             xQueueSend(polaris_queue, rx_buf.recbytes, portMAX_DELAY);
         		}
@@ -368,7 +426,6 @@ static void udp_server_task(void *pvParameters) {
                             avail_task = task_index;
                         }
                     }
-
                     if (avail_task < 0) {
                         ESP_LOGE(TAG, "There are no more available GPIO workers to run");        
                     }
@@ -377,12 +434,15 @@ static void udp_server_task(void *pvParameters) {
                         xQueueSend(gpio_queue[avail_task], &rx_buf, portMAX_DELAY);
                     }
                     printf("Added to gpio task %d", avail_task);
-                }
+                }    
+        		else if(strstr(rx_buf.recbytes,"ledc")!= NULL){
+        			xQueueSend(ledc_queue, &rx_buf, portMAX_DELAY);
+        			ESP_LOGI(TAG, "added to ledc queue");
+        		}
         		else if(strstr(rx_buf.recbytes,"killtasknum")!= NULL) {
         		    xQueueSend(kill_queue, &rx_buf, portMAX_DELAY);
         		    ESP_LOGI(TAG, "added to kill queue");
-        
-        		}
+                }    
             }
         }
         
@@ -402,11 +462,7 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     Op_gpio *op;
     op = malloc(sizeof(Op_gpio));
     msgpack_unpacked und;
-    //Rx_buf rx_buf = *rx_buf_ptr;
-    //printf("\nin unpack_ctrl_GPIO, rx_buf_ptr is %p\n", rx_buf_ptr);
-    printf("\nin unpack_ctrl_GPIO, &rx_buf is %p\n", &rx_buf);
-    ESP_LOGI(TAG, "%s", rx_buf.recbytes);
-    printf("buffer is : %s", rx_buf.recbytes);
+    bool gpio_state = 0;
     // Initalize unpacked object
     msgpack_unpacked_init(&und);
     //Unpack
@@ -427,34 +483,48 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     msgpack_unpacked_destroy(&und);
 
     for (int a = 0; a < op->num_actions; a++) { // for each action
-            printf("freeRTOS tick length: %ld \n",portTICK_PERIOD_MS);
+        printf("freeRTOS tick length: %ld \n",portTICK_PERIOD_MS);
 	
-	int gpio = op->gpio;
-	int repeat = op->act_seq[a]->repeat;
-	int delay_pre = op->act_seq[a]->delay_pre;
-	int duration = op->act_seq[a]->duration;
-	int delay_post = op->act_seq[a]->delay_post;
-	int tasknum = op->tasknum;
-	int totalcycletime = delay_pre + duration + delay_post;
+	    int repeat_counter = 0;
+        int repeat = 1;
+        printf("repeat is %d", op->act_seq[a]->repeat);
+        while(repeat && (op->tasknum != killtasknum)) { // for each repeat
+            
+            // pre-delay
+            if (op->act_seq[a]->delay_pre > 0) {
+              printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
+              vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+            }
 
-	int freq = 1000/totalcycletime; //milliseconds to Hz
-	int duty = (8192*duration)/totalcycletime - 1;
+            // action
+            if (!strcmp(op->act_seq[a]->action, "up")){
+                gpio_state = 1;
+                printf("setting gpio %d up for %d msec\n", op->gpio, op->act_seq[a]->duration);
+            }
+            else if (!strcmp(op->act_seq[a]->action, "down")) {
+                gpio_state = 0;
+                printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
+            }
+            gpio_set_level(op->gpio, gpio_state);
+            if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
+                vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
+                gpio_set_level(op->gpio, !gpio_state);
+            }
 
-	// if given up action:
-	if (!strcmp(op->act_seq[a]->action,"up")){
-		printf("duty is %d \n", duty);
-
-		ledc_init();
-		ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty));
-		ESP_ERROR_CHECK(ledc_set_pin(gpio,LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
-		ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,freq));
-		if (repeat > 0) {
-			ESP_ERROR_CHECK(ledc_set_duty_with_hpoint(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty,repeat));
-		}
-		ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
-	}
-
-        }
+            // post-delay
+            if (op->act_seq[a]->delay_post > 0) {
+                printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
+                vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
+            }
+               
+            // check repeat
+            repeat_counter++;
+            if (repeat_counter == op->act_seq[a]->repeat) {
+                repeat = 0;
+            }
+	    }
+    }
+    killtasknum = 0;
     free(op);
     inactive_tasks[index] = index; // once this func is done, put this task back on the inactive task array
 }
@@ -473,6 +543,62 @@ void vTaskGPIO(void *pvParameters) {
 }
 
 
+
+// task definition for ledc task
+void vTaskLEDC(void * pvParameters){
+    Op_ledc *op;
+    Rx_buf rx_buf;
+    op = malloc(sizeof(Op_ledc));
+    for (;;) {
+	if (xQueueReceive(ledc_queue, &rx_buf, portMAX_DELAY)) {
+            msgpack_unpacked und;
+            // Initalize unpacked object
+            msgpack_unpacked_init(&und);
+            //Unpack
+            msgpack_unpack_return ret;
+            ret = msgpack_unpack_next(&und, rx_buf.recbytes, rx_buf.len, NULL);
+            if (ret == MSGPACK_UNPACK_SUCCESS) {
+                msgpack_object object = und.data;
+                msgpack_object_print(stdout, object);
+                printf("\n");
+                // Do stuff with unpacked object...
+                parse_object_ledc(object, op);
+            }
+            else {
+                printf("Error in unpacking");
+            }
+
+            // Destroy unpacked object
+            msgpack_unpacked_destroy(&und);
+
+            printf("freeRTOS tick length: %ld \n",portTICK_PERIOD_MS);
+	    int gpio = op->gpio;	
+	    int freq = op->freq;
+	    int dutyfrac = op->duty;
+	    
+	    int duty = ((8192*dutyfrac)/100) - 1;
+
+	    printf("duty is %d \n", duty);
+	    printf("freq is %d \n",freq);	
+
+	    ledc_init();
+	    	
+	    ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty));
+	    	
+	    ESP_ERROR_CHECK(ledc_set_pin(gpio,LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
+	    	
+	    ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE,LEDC_TIMER_0,freq));
+	    	
+	    //if (repeat > 0) {
+	    // 	ESP_ERROR_CHECK(ledc_set_duty_with_hpoint(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty,repeat));
+	    //}
+	    ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0));
+        }
+    }
+    free(op);
+}
+
+// task definition for kill task
 void vTaskKill(void * pvParameters) {
     Rx_buf rx_buf;
     
@@ -613,6 +739,10 @@ void app_main(void) {
         ESP_LOGE(TAG, "Could not create kill queue.");
     }
  
+    if (!(ledc_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
+        ESP_LOGE(TAG, "Could not create ledc queue.");
+    }
+    
     if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * POLARIS_CMD_MAX_LEN))) {
         ESP_LOGE(TAG, "Could not create polaris queue.");
     }
@@ -630,6 +760,9 @@ void app_main(void) {
     TaskHandle_t xTaskKill = NULL;
     xTaskCreate(vTaskKill, "KILL", 1024*3, NULL , KILL_PRIORITY , &xTaskKill);
     
+    TaskHandle_t xTaskLEDC = NULL;
+    xTaskCreate(vTaskLEDC, "LEDC", 4096, NULL, LEDC_PRIORITY, &xTaskLEDC);
+
     TaskHandle_t xTaskPolaris = NULL;
     xTaskCreate(vTaskPolaris, "POLARIS", 1024*2, NULL , POLARIS_PRIORITY , &xTaskPolaris);
     
