@@ -52,7 +52,7 @@
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
 // TODO make this programmatic?
 #define NUM_RESOURCES 4 // 3 GPIO, and polaris TX
-#define CLIENT_PRIORITY (tskIDLE_PRIORITY + 9)
+#define CLIENT_PRIORITY (tskIDLE_PRIORITY + 4)
 #define SERVER_PRIORITY (tskIDLE_PRIORITY + 10)
 #define KILL_PRIORITY  (tskIDLE_PRIORITY + 3)
 #define LEDC_PRIORITY (tskIDLE_PRIORITY + 4)
@@ -67,7 +67,7 @@
 #define MAX_BUF_LEN 1500
 #define POLARIS_CMD_MAX_LEN 15
 #define CONFIG_FREERTOS_HZ 1000
-#define N_GPIO_TASKS 20 // Modify to save on applicatio memory, as well as stack size for each task
+#define N_GPIO_TASKS 3 // Modify to save on applicatio memory, as well as stack size for each task
 
 static const char *TAG = "eth_example";
 char input;
@@ -430,10 +430,10 @@ static void udp_server_task(void *pvParameters) {
                         ESP_LOGE(TAG, "There are no more available GPIO workers to run");        
                     }
                     else {
-                        printf("in udp_server_task, &rx_buf is %p", &rx_buf);
+                        printf("\nin udp_server_task, &rx_buf is %p\n", &rx_buf);
                         xQueueSend(gpio_queue[avail_task], &rx_buf, portMAX_DELAY);
                     }
-                    printf("Added to gpio task %d", avail_task);
+                    printf("\nAdded to gpio task %d\n", avail_task);
                 }    
         		else if(strstr(rx_buf.recbytes,"ledc")!= NULL){
         			xQueueSend(ledc_queue, &rx_buf, portMAX_DELAY);
@@ -478,6 +478,7 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     else {
         printf("\nError in unpacking. Ret = %d\n", ret);        
     }
+    printf("rx_buf is %s", rx_buf.recbytes);
 
     // Destroy unpacked object
     msgpack_unpacked_destroy(&und);
@@ -487,7 +488,7 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
 	
 	    int repeat_counter = 0;
         int repeat = 1;
-        printf("repeat is %d", op->act_seq[a]->repeat);
+        printf("repeat is %d\n", op->act_seq[a]->repeat);
         while(repeat && (op->tasknum != killtasknum)) { // for each repeat
             
             // pre-delay
@@ -526,6 +527,7 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     }
     killtasknum = 0;
     free(op);
+    printf("\nGPIO task %d is done\n", index);
     inactive_tasks[index] = index; // once this func is done, put this task back on the inactive task array
 }
 
