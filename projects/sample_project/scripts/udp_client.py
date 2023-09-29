@@ -5,48 +5,64 @@ import sys
 
 port = 3333
 wesp_ip_address = sys.argv[1] or "192.168.98.124"
-default_payload = {                     # gpio operation dict
+gpio_payload_4 = {                     # gpio operation dict
     "gpio": 4,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
         {
             "action": "up",     # up or down
-            "duration": 100,    # in ms, -1 for keeping state up/down
-            "delay_pre": 100,    # in ms, -1 for no delay before pulse
+            "duration": 300,    # in ms, -1 for keeping state up/down
+            "delay_pre": 150,    # in ms, -1 for no delay before pulse
+            "delay_post": 150,   # in ms, -1 for no delay after pulse
+            "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
+        },
+    ],
+}
+gpio_payload_15 = {                     # gpio operation dict
+    "gpio": 15,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 2000,    # in ms, -1 for keeping state up/down
+            "delay_pre": 150,    # in ms, -1 for no delay before pulse
+            "delay_post": 150,   # in ms, -1 for no delay after pulse
+            "repeat": 1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
+        },
+    ],
+}
+gpio_payload_13 = {                     # gpio operation dict
+    "gpio": 13,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 1000,    # in ms, -1 for keeping state up/down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
             "delay_post": -1,   # in ms, -1 for no delay after pulse
-            "repeat": -1         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
+            "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
         },
+    ],
+}
+
+ledc_payload_4 = {                     # gpio operation dict
+    "ledc": 4,                      # gpio pin to perform on
+    "freq": 70,     # in hz
+    "duty": 50,    # percent 
+}
+
+b_payload = {                     # gpio operation dict
+    "gpio": 4,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
         {
-            "action": "down",
-            "duration": 50,
-            "delay_pre": 1000,
-            "delay_post": -1,
-            "repeat": 1
+            "action": "up",     # up or down
+            "duration": 1,    # in ms, -1 for keeping state up/down
+            "delay_pre": 1,    # in ms, -1 for no delay before pulse
+            "delay_post": 6,   # in ms, -1 for no delay after pulse
+            "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
         },
-        {
-            "action": "up",
-            "duration": 100,
-            "delay_pre": -1,
-            "delay_post": -1,
-            "repeat": 2
-        },
-        {
-            "action": "down",
-            "duration": 100,
-            "delay_pre": -1,
-            "delay_post": 500,
-            "repeat": 3
-        },
-        {
-            "action": "up",
-            "duration": 100,
-            "delay_pre": -1,
-            "delay_post": -1,
-            "repeat": 1
-        }
 
     ],
 }
 
+other_payload = {}
 
 # set up UDP server on lico
 def set_UDP_sock(address, port):
@@ -91,8 +107,22 @@ def main():
             payload = "polaris_init".encode()
         elif key == "2":
             payload = "polaris_read".encode()
-        elif key == "3":
-            payload = msgpack.packb(default_payload, use_bin_type=True)
+        elif key == "g4":
+            print(gpio_payload_4)
+            payload = msgpack.packb(gpio_payload_4, use_bin_type=True)
+        elif key == "g15":
+            print(gpio_payload_15)
+            payload = msgpack.packb(gpio_payload_15, use_bin_type=True)
+        elif key == "g13":
+            print(gpio_payload_13)
+            payload = msgpack.packb(gpio_payload_13, use_bin_type=True)
+        elif key == "l4":
+            payload = msgpack.packb(ledc_payload_4, use_bin_type=True)
+        elif key == "k":
+            task_to_kill = input("kill task number:")
+            other_payload.update({"killtasknum": int(task_to_kill)})
+            print(other_payload)
+            payload = msgpack.packb(other_payload, use_bin_type=True)
         else:
             payload = key.encode()
         send_UDP_packet(sock, addr, payload)
@@ -101,3 +131,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+#test
