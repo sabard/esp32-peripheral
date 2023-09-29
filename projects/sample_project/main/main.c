@@ -66,8 +66,8 @@
 #define GPIO_MAX_SEQ 5 // maximum number of gpio action modules you can put together (arbitrarily defined for now)
 #define MAX_BUF_LEN 1500
 #define POLARIS_CMD_MAX_LEN 15
-#define CONFIG_FREERTOS_HZ 1000
-#define N_GPIO_TASKS 3 // Modify to save on applicatio memory, as well as stack size for each task
+#define FREERTOS_HZ CONFIG_FREERTOS_HZ 
+#define N_GPIO_TASKS 10 // can support up to around 20 max given application memory, and I fine tuned the stack size for each task
 
 static const char *TAG = "eth_example";
 char input;
@@ -90,7 +90,7 @@ typedef struct {
 typedef struct {
     int gpio;
     int num_actions;
-    int tasknum;
+//    int tasknum;
     struct module {
         char* action;
         int duration;
@@ -104,7 +104,7 @@ typedef struct {
     int gpio;
     int freq;
     int duty;
-    int tasknum;
+//    int tasknum;
 } Op_ledc;
 
 int killtasknum = 0;
@@ -144,8 +144,8 @@ void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the 
 
         op->num_actions = map_ptr[1].val.via.array.size;
 	
-	op->tasknum = map_ptr[2].val.via.i64;
-	ESP_LOGI(TAG, "task number = %d",op->tasknum);
+	//op->tasknum = map_ptr[2].val.via.i64;
+	//ESP_LOGI(TAG, "task number = %d",op->tasknum);
 
         for (int a = 0 ; a < op->num_actions; a++) {
 
@@ -202,7 +202,7 @@ void parse_keys_ledc(char* keys[], msgpack_object_kv* map_ptr, Op_ledc *op){
 
 	op->gpio = map_ptr[0].val.via.i64;
 
-	ledctask = map_ptr[3].val.via.i64;
+	ledctask = op->gpio; //map_ptr[3].val.via.i64;
 
         op->freq = map_ptr[1].val.via.i64;
 	
@@ -371,7 +371,7 @@ static void udp_server_task(void *pvParameters) {
     int ip_protocol = 0;
     struct sockaddr_in addr;
     int sock;
-
+    printf("\n FREERTOS_HZ is : %d\n", FREERTOS_HZ);
     while (1) {
 
         addr.sin_addr.s_addr =inet_addr(STATIC_IP_ADDR);  // htonl(INADDR_ANY);
@@ -489,7 +489,7 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
 	    int repeat_counter = 0;
         int repeat = 1;
         printf("repeat is %d\n", op->act_seq[a]->repeat);
-        while(repeat && (op->tasknum != killtasknum)) { // for each repeat
+        while(repeat && (op->gpio != killtasknum)) { // for each repeat
             
             // pre-delay
             if (op->act_seq[a]->delay_pre > 0) {
@@ -760,7 +760,7 @@ void app_main(void) {
     }
     
     TaskHandle_t xTaskKill = NULL;
-    xTaskCreate(vTaskKill, "KILL", 1024*3, NULL , KILL_PRIORITY , &xTaskKill);
+    xTaskCreate(vTaskKill, "KILL", 1024*8, NULL , KILL_PRIORITY , &xTaskKill);
     
     TaskHandle_t xTaskLEDC = NULL;
     xTaskCreate(vTaskLEDC, "LEDC", 4096, NULL, LEDC_PRIORITY, &xTaskLEDC);
