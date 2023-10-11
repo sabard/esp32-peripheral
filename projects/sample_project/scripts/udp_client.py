@@ -7,7 +7,34 @@ port = 3333
 if len(sys.argv) > 1:
     wesp_ip_address = sys.argv[1] 
 else:
-    wesp_ip_address = "192.168.98.124"
+    wesp_ip_address = "192.168.138.40"
+
+light_on_seq = {
+  "gpio": 5,
+  "action_seq": [
+    {
+      "action": "up",     # up or down
+      "duration": 50,    # in ms, -1 for keeping state up/down
+      "delay_pre": -1,    # in ms, -1 for no delay before pulse
+      "delay_post": -1,   # in ms, -1 for no delay after pulse
+      "repeat": -1         # -1 for infinite
+    },
+  ],
+}
+
+light_off_seq = {
+  "gpio": 4,
+  "action_seq": [
+    {
+      "action": "up",     # up or down
+      "duration": 50,    # in ms, -1 for keeping state up/down
+      "delay_pre": -1,    # in ms, -1 for no delay before pulse
+      "delay_post": -1,   # in ms, -1 for no delay after pulse
+      "repeat": -1         # -1 for infinite
+    },
+  ],
+}
+
 default_payload = {                     # gpio operation dict
     "gpio": 4,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
@@ -98,6 +125,10 @@ def main():
             payload = "polaris_down".encode()
         elif key == "4":
             payload = msgpack.packb(default_payload, use_bin_type=True)
+        elif key == "5":
+            payload = msgpack.packb(light_on_seq, use_bin_type=True)
+        elif key == "6":
+            payload = msgpack.packb(light_off_seq, use_bin_type=True)
         else:
             payload = key.encode()
         send_UDP_packet(sock, addr, payload)
