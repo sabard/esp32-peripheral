@@ -77,8 +77,8 @@ void polaris_send_init_seq(char *read_buf){
 
     ESP_LOGI(TAG, "POLARIS INIT");
 
-    // Write data to UART.
-    uart_write("This is a test string.\n");
+    // // Write data to UART.
+    // uart_write("This is a test string.\n");
 
 
     // send break with beep (need to send something)

@@ -22,18 +22,45 @@ gpio_payload_4 = {                     # gpio operation dict
         },
     ],
 }
-gpio_payload_15 = {                     # gpio operation dict
-    "gpio": 15,                      # gpio pin to perform on
+gpio_payload_5 = {                     # gpio operation dict
+    "gpio": 5,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
         {
             "action": "up",     # up or down
-            "duration": 2000,    # in ms, -1 for keeping state up/down
+            "duration": 300,    # in ms, -1 for keeping state up/down
             "delay_pre": 150,    # in ms, -1 for no delay before pulse
             "delay_post": 150,   # in ms, -1 for no delay after pulse
+            "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely
+        },
+    ],
+}
+
+gpio_payload_light_on = {                     # gpio operation dict
+    "gpio": 5,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 500,    # in ms, -1 for keeping state up/down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
+            "delay_post": 100,   # in ms, -1 for no delay after pulse
             "repeat": 1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
         },
     ],
 }
+
+gpio_payload_light_off = {                     # gpio operation dict
+    "gpio": 4,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 500,    # in ms, -1 for keeping state up/down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
+            "delay_post": 100,   # in ms, -1 for no delay after pulse
+            "repeat": 1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely
+        },
+    ],
+}
+
 gpio_payload_13 = {                     # gpio operation dict
     "gpio": 13,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
@@ -117,9 +144,15 @@ def main():
         elif key == "g4":
             print(gpio_payload_4)
             payload = msgpack.packb(gpio_payload_4, use_bin_type=True)
-        elif key == "g15":
-            print(gpio_payload_15)
-            payload = msgpack.packb(gpio_payload_15, use_bin_type=True)
+        elif key == "g5":
+            print(gpio_payload_5)
+            payload = msgpack.packb(gpio_payload_5, use_bin_type=True)
+        elif key == "light_on":
+            print(gpio_payload_light_on)
+            payload = msgpack.packb(gpio_payload_light_on, use_bin_type=True)
+        elif key == "light_off":
+            print(gpio_payload_light_off)
+            payload = msgpack.packb(gpio_payload_light_off, use_bin_type=True)
         elif key == "g13":
             print(gpio_payload_13)
             payload = msgpack.packb(gpio_payload_13, use_bin_type=True)
