@@ -14,7 +14,7 @@ light_on_seq = {
   "action_seq": [
     {
       "action": "up",     # up or down
-      "duration": 50,    # in ms, -1 for keeping state up/down
+      "duration": 1000,    # in ms, -1 for keeping state up/down
       "delay_pre": -1,    # in ms, -1 for no delay before pulse
       "delay_post": -1,   # in ms, -1 for no delay after pulse
       "repeat": -1         # -1 for infinite
