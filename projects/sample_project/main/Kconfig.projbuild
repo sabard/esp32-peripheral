@@ -7,6 +7,13 @@ menu "Example Configuration"
         help
             Local port the example server will listen on.
 
+    config EXAMPLE_PORT_2
+        int "Port 2"
+        range 0 65535
+        default 3334
+        help
+            Local port the second example server will listen on.
+
 	config EXAMPLE_STATIC_IP_ADDR
         string "wESP32 Static IP address"
         default "192.168.98.124"

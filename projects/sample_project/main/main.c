@@ -45,6 +45,7 @@
 #include "esp_err.h"
 
 #define PORT CONFIG_EXAMPLE_PORT
+#define PORT_2 CONFIG_EXAMPLE_PORT_2
 #define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
 #define STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
@@ -81,6 +82,12 @@ static QueueHandle_t ledc_queue = NULL;
 static QueueHandle_t udp_client_queue = NULL;
 static QueueHandle_t gpio_queue[N_GPIO_TASKS];
 static QueueHandle_t polaris_queue = NULL;
+
+typedef struct {
+    int addr_family;
+    char *ip_addr;
+    int port;
+} Server_params;
 
 typedef struct {
     char recbytes[1500];
@@ -367,16 +374,17 @@ static void init_wesp32_eth()
 
 static void udp_server_task(void *pvParameters) {
     Rx_buf rx_buf;
-    int addr_family = (int)pvParameters;
+    Server_params *server_params = (Server_params *)pvParameters;
+    int addr_family = server_params->addr_family;
     int ip_protocol = 0;
     struct sockaddr_in addr;
     int sock;
     printf("\n FREERTOS_HZ is : %d\n", FREERTOS_HZ);
     while (1) {
 
-        addr.sin_addr.s_addr =inet_addr(STATIC_IP_ADDR);  // htonl(INADDR_ANY);
+        addr.sin_addr.s_addr =inet_addr(server_params->ip_addr);  // htonl(INADDR_ANY);
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(PORT);
+        addr.sin_port = htons(server_params->port);
         ip_protocol = IPPROTO_IP;
 
         sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
@@ -641,7 +649,8 @@ void vTaskPolaris(void *pvParameters) {
     TickType_t delay = portMAX_DELAY;
 
     for (;;) {
-        if(xQueueReceive(polaris_queue, rx_buffer, delay) || streaming) {            if (streaming) {
+        if(xQueueReceive(polaris_queue, rx_buffer, delay) || streaming) {
+            if (streaming) {
                 polaris_read(&frame, polaris_read_buf);
                 xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
                 if (strlen(rx_buffer) == 0) {
@@ -732,7 +741,19 @@ static void configure_led(void) {
 void app_main(void) {
     init_wesp32_eth();
 
-    xTaskCreate(udp_server_task, "UDP_SERVER", 1024*4, (void*)AF_INET, SERVER_PRIORITY, NULL);
+    Server_params sp1;
+    Server_params sp2;
+
+    sp1.addr_family = AF_INET;
+    sp1.port = PORT;
+    sp1.ip_addr = STATIC_IP_ADDR;
+
+    sp2.addr_family = AF_INET;
+    sp2.port = PORT_2;
+    sp2.ip_addr = STATIC_IP_ADDR;
+
+    xTaskCreate(udp_server_task, "UDP_SERVER", 1024*4, (void*)&sp1, SERVER_PRIORITY, NULL);
+    xTaskCreate(udp_server_task, "UDP_SERVER_2", 1024*4, (void*)&sp2, SERVER_PRIORITY, NULL);
 
     configure_led();
 
@@ -771,7 +792,7 @@ void app_main(void) {
     xTaskCreate(vTaskLEDC, "LEDC", 4096, NULL, LEDC_PRIORITY, &xTaskLEDC);
 
     TaskHandle_t xTaskPolaris = NULL;
-    xTaskCreate(vTaskPolaris, "POLARIS", 1024*2, NULL , POLARIS_PRIORITY , &xTaskPolaris);
+    xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
     
     xTaskCreate(udp_client_task, "UDP_CLIENT", 1024*2, (void*)AF_INET , CLIENT_PRIORITY , NULL);
 }

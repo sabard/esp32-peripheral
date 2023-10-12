@@ -61,6 +61,19 @@ gpio_payload_light_off = {                     # gpio operation dict
     ],
 }
 
+gpio_payload_juice_dispense = {                     # gpio operation dict
+    "gpio": 14,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 70,    # in ms, -1 for keeping state up/down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
+            "delay_post": -1,   # in ms, -1 for no delay after pulse
+            "repeat": 1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely
+        },
+    ],
+}
+
 gpio_payload_13 = {                     # gpio operation dict
     "gpio": 13,                      # gpio pin to perform on
     "action_seq": [                 # list of action module dicts
@@ -153,6 +166,11 @@ def main():
         elif key == "light_off":
             print(gpio_payload_light_off)
             payload = msgpack.packb(gpio_payload_light_off, use_bin_type=True)
+        elif key == "juice":
+            print(gpio_payload_juice_dispense)
+            payload = msgpack.packb(
+                gpio_payload_juice_dispense, use_bin_type=True
+            )
         elif key == "g13":
             print(gpio_payload_13)
             payload = msgpack.packb(gpio_payload_13, use_bin_type=True)
