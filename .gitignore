@@ -1,3 +1,7 @@
-projects/sample_project/build/*
-projects/sample_project/main/build/*
+build/*
+main/build/*
 
+sdkconfig*
+.python-version
+build/
+.__afs
