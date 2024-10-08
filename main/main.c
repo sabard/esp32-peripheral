@@ -17,6 +17,7 @@
 
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
@@ -28,38 +29,38 @@
 #include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_err.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "sdkconfig.h"
-
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
+
+#include "ethernet_init.h"
 #include "msgpack.h"
+#include "wifi.h"
 
-#include "polaris.h"
 
-#include <stdint.h>
-
-#include "driver/ledc.h"
-#include "esp_err.h"
-
-#define PORT CONFIG_EXAMPLE_PORT
-#define PORT_2 CONFIG_EXAMPLE_PORT_2
-#define STATIC_IP_ADDR        CONFIG_EXAMPLE_STATIC_IP_ADDR
-#define STATIC_NETMASK_ADDR   CONFIG_EXAMPLE_STATIC_NETMASK_ADDR
+#define PORT CONFIG_PORT
+#define PORT_2 CONFIG_PORT_2
+#define STATIC_IP_ADDR        CONFIG_STATIC_IP_ADDR
+#define STATIC_NETMASK_ADDR   CONFIG_STATIC_NETMASK_ADDR
 #define JUICE_GPIO  CONFIG_GPIO_JUICE
 #define LIGHT_ON_GPIO  CONFIG_GPIO_LIGHT_ON
 #define LIGHT_OFF_GPIO  CONFIG_GPIO_LIGHT_OFF
 // TODO make this programmatic?
-#define NUM_RESOURCES 4 // 3 GPIO, and polaris TX
+#define NUM_RESOURCES 4 // 3 GPIO
 #define CLIENT_PRIORITY (tskIDLE_PRIORITY + 4)
 #define SERVER_PRIORITY (tskIDLE_PRIORITY + 10)
 #define KILL_PRIORITY  (tskIDLE_PRIORITY + 3)
 #define LEDC_PRIORITY (tskIDLE_PRIORITY + 4)
 #define GPIO_PRIORITY  (tskIDLE_PRIORITY + 5)
 #define POLARIS_PRIORITY (tskIDLE_PRIORITY + 4)
-#define PULSE_LENGTH_MSEC CONFIG_PULSE_LENGTH_MSEC
 #define TIMEOUT_SOCKET_SEC CONFIG_TIMEOUT_SOCKET_SEC
 #define TIMEOUT_SOCKET_USEC CONFIG_TIMEOUT_SOCKET_USEC
 #define HOST_IP_ADDR CONFIG_HOST_IP_ADDR // computer's ip address communicating with lico   
@@ -69,6 +70,9 @@
 #define POLARIS_CMD_MAX_LEN 15
 #define FREERTOS_HZ CONFIG_FREERTOS_HZ 
 #define N_GPIO_TASKS 10 // can support up to around 20 max given application memory, and I fine tuned the stack size for each task
+
+// analog read
+#define ADC_ATTEN ADC_ATTEN_DB_12
 
 static const char *TAG = "eth_example";
 char input;
@@ -81,7 +85,11 @@ static QueueHandle_t kill_queue = NULL;
 static QueueHandle_t ledc_queue = NULL;
 static QueueHandle_t udp_client_queue = NULL;
 static QueueHandle_t gpio_queue[N_GPIO_TASKS];
-static QueueHandle_t polaris_queue = NULL;
+
+typedef struct {
+    int gpio;
+    int val;
+} Client_payload;
 
 typedef struct {
     int addr_family;
@@ -95,16 +103,18 @@ typedef struct {
 } Rx_buf;
 
 typedef struct {
+    char* name;
+    int duration;
+    int delay_pre;
+    int delay_post;
+    int repeat;
+} Action;
+
+typedef struct {
     int gpio;
     int num_actions;
 //    int tasknum;
-    struct module {
-        char* action;
-        int duration;
-        int delay_pre;
-        int delay_post;
-        int repeat;
-    } *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
+    Action *act_seq[GPIO_MAX_SEQ]; // an unspecified array of pointers to the module structs
 } Op_gpio;
 
 typedef struct {
@@ -142,6 +152,8 @@ static void ledc_init(void){
 
 // parse the keys for a custom square wave task
 void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the key ordering/structure in the dict is sensitive; i.e. in the dict sent to wESP32, the pin field has to be first key before action_seq
+    Action *action;
+
     ESP_LOGI(TAG, "%s",keys[0]);
 	
     if (strstr(keys[0], "gpio")!=0) { // if first entry in dict is a gpio pin
@@ -154,22 +166,23 @@ void parse_keys(char* keys[], msgpack_object_kv* map_ptr, Op_gpio *op){  // the 
 	//op->tasknum = map_ptr[2].val.via.i64;
 	//ESP_LOGI(TAG, "task number = %d",op->tasknum);
 
-        for (int a = 0 ; a < op->num_actions; a++) {
+        for (int i = 0; i < op->num_actions; i++) {
 
-            op->act_seq[a] = malloc(sizeof(struct module));
+            action = malloc(sizeof(Action));
+            op->act_seq[i] = action;
 
-            msgpack_object_str act_str_obj= map_ptr[1].val.via.array.ptr[a].via.map.ptr[0].val.via.str; // 1st index (1) is for act_seq, 2nd index (a) is for action number, 3rd index (0) is for what config of the action, in this case "action"
-            op->act_seq[a]->action = (char*) malloc((act_str_obj.size+1)*sizeof(char));
+            msgpack_object_str act_str_obj= map_ptr[1].val.via.array.ptr[i].via.map.ptr[0].val.via.str; // 1st index (1) is for act_seq, 2nd index (a) is for action number, 3rd index (0) is for what config of the action, in this case "action"
+            action->name = (char*) malloc((act_str_obj.size+1)*sizeof(char));
 
             for (int l=0; l<act_str_obj.size; l++) {
-                op->act_seq[a]->action[l] = *(act_str_obj.ptr + l);
+                action->name[l] = *(act_str_obj.ptr + l);
             }
-            op->act_seq[a]->action[act_str_obj.size] = 0;
+            action->name[act_str_obj.size] = 0;
 
-            op->act_seq[a]->duration = map_ptr[1].val.via.array.ptr[a].via.map.ptr[1].val.via.i64;
-            op->act_seq[a]->delay_pre = map_ptr[1].val.via.array.ptr[a].via.map.ptr[2].val.via.i64;
-            op->act_seq[a]->delay_post = map_ptr[1].val.via.array.ptr[a].via.map.ptr[3].val.via.i64;
-            op->act_seq[a]->repeat = map_ptr[1].val.via.array.ptr[a].via.map.ptr[4].val.via.i64;		
+            action->duration = map_ptr[1].val.via.array.ptr[i].via.map.ptr[1].val.via.i64;
+            action->delay_pre = map_ptr[1].val.via.array.ptr[i].via.map.ptr[2].val.via.i64;
+            action->delay_post = map_ptr[1].val.via.array.ptr[i].via.map.ptr[3].val.via.i64;
+            action->repeat = map_ptr[1].val.via.array.ptr[i].via.map.ptr[4].val.via.i64;
 	}
 	
     
@@ -333,15 +346,21 @@ static void init_wesp32_eth()
     // Initialize mac config to default
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_config.smi_mdc_gpio_num = 16;
-    emac_config.smi_mdio_gpio_num = 17;
+    emac_config.smi_mdc_gpio_num = 23;
+    emac_config.smi_mdio_gpio_num = 18;
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
 
     // Initialize phy config to default
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = 0;
+#if CONFIG_ESP_WESP32
     phy_config.reset_gpio_num = -1;
+    phy_config.phy_addr = 0;
     esp_eth_phy_t *phy = esp_eth_phy_new_rtl8201(&phy_config);
+#elif CONFIG_ESP_WT32_ETH01
+    phy_config.reset_gpio_num = 16;
+    phy_config.phy_addr = 1;
+    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
+#endif
 
     // Initialize TCP/IP network interface (should be called only once in application)
     ESP_ERROR_CHECK(esp_netif_init());
@@ -382,7 +401,7 @@ static void udp_server_task(void *pvParameters) {
     printf("\n FREERTOS_HZ is : %d\n", FREERTOS_HZ);
     while (1) {
 
-        addr.sin_addr.s_addr =inet_addr(server_params->ip_addr);  // htonl(INADDR_ANY);
+        addr.sin_addr.s_addr = inet_addr(server_params->ip_addr);  // htonl(INADDR_ANY);
         addr.sin_family = AF_INET;
         addr.sin_port = htons(server_params->port);
         ip_protocol = IPPROTO_IP;
@@ -398,7 +417,7 @@ static void udp_server_task(void *pvParameters) {
         if (err < 0) {
             ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         }
-        ESP_LOGI(TAG, "Socket bound, port %d", PORT);
+        ESP_LOGI(TAG, "Socket bound, port %d", server_params->port);
 
         struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
         socklen_t socklen = sizeof(source_addr);
@@ -424,10 +443,7 @@ static void udp_server_task(void *pvParameters) {
                 ESP_LOGI(TAG, "%s", rx_buf.recbytes);
 		
 
-        		if (strncmp(rx_buf.recbytes, "polaris", 7) == 0) {
-                            xQueueSend(polaris_queue, rx_buf.recbytes, portMAX_DELAY);
-        		}
-        		else if(strstr(rx_buf.recbytes,"gpio")!= NULL){
+        		if(strstr(rx_buf.recbytes,"gpio")!= NULL){
                     avail_task = -1;
                     for (task_index=0; task_index<N_GPIO_TASKS; task_index++) { // find what is the next available free task
                         if (inactive_tasks[task_index] >= 0 ) { // if this task index is an inactive task
@@ -463,14 +479,63 @@ static void udp_server_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
+int gpio_to_adc_chan(int num, int gpio) {
+    int chan = -1;
+    if (num == 1) {
+        if (gpio > 35) chan = gpio - 36;
+        else chan = gpio - 28;
 
+        if (chan < 0 || chan > 7) {
+            printf("Unsupported ADC1 channel.\n");
+            return -1;
+        }
+    }
+    else if (num == 2) {
+        // TODO support ESP32-S2 which has a different mapping
+        // https://docs.espressif.com/projects/esp-idf/en/release-v4.3/esp32/api-reference/peripherals/adc.html#_CPPv414adc2_channel_t
+        if (gpio == 4) chan = 0;
+        else if (gpio == 0) chan = 1;
+        else if (gpio == 2) chan = 2;
+        else if (gpio == 15) chan = 3;
+        else if (gpio == 13) chan = 4;
+        else if (gpio == 12) chan = 5;
+        else if (gpio == 14) chan = 6;
+        else if (gpio == 27) chan = 7;
+        else if (gpio == 25) chan = 8;
+        else if (gpio == 26) chan = 9;
+
+        if (chan < 0 || chan > 9) {
+            printf("Unsupported ADC2 channel.\n");
+            return -1;
+        }
+    }
+    else {
+        printf("Unsupported ADC number.\n");
+        return -1;
+    }
+    return chan;
+}
+
+int adc_read_oneshot(int num, int chan) {
+    return 1;
+}
 
 void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     inactive_tasks[index] = -1; // take this task off the inactive task array so it won't be called upon
     Op_gpio *op;
     op = malloc(sizeof(Op_gpio));
+    int repeat_counter;
+    int repeat;
+    Action *action;
     msgpack_unpacked und;
     bool gpio_state = 0;
+
+    // read
+    int adc_num;
+    Client_payload client_payload;
+    int adc_chan;
+    int read_val;
+
     // Initalize unpacked object
     msgpack_unpacked_init(&und);
     //Unpack
@@ -491,44 +556,93 @@ void unpack_ctrl_GPIO(Rx_buf rx_buf, int index) {
     // Destroy unpacked object
     msgpack_unpacked_destroy(&und);
 
-    for (int a = 0; a < op->num_actions; a++) { // for each action
+    for (int i = 0; i < op->num_actions; i++) { // for each action
+	    repeat_counter = 0;
+        repeat = 1;
+        action = op->act_seq[i];
+
         printf("freeRTOS tick length: %ld \n",portTICK_PERIOD_MS);
-	
-	    int repeat_counter = 0;
-        int repeat = 1;
-        printf("repeat is %d\n", op->act_seq[a]->repeat);
+        printf("repeat is %d\n", action->repeat);
+
         while(repeat && (op->gpio != killtasknum)) { // for each repeat
-            
+
             // pre-delay
-            if (op->act_seq[a]->delay_pre > 0) {
-              printf("delaying before pulse for %d msec\n",op->act_seq[a]->delay_pre);
-              vTaskDelay(op->act_seq[a]->delay_pre / portTICK_PERIOD_MS);
+            if (action->delay_pre > 0) {
+              printf("delaying before pulse for %d msec\n",action->delay_pre);
+              vTaskDelay(action->delay_pre / portTICK_PERIOD_MS);
             }
 
             // action
-            if (!strcmp(op->act_seq[a]->action, "up")){
-                gpio_state = 1;
-                printf("setting gpio %d up for %d msec\n", op->gpio, op->act_seq[a]->duration);
+            if (!strncmp(action->name, "read", 4)) {
+                client_payload.gpio = op->gpio;
+                if(!strcmp(action->name, "read_digital")) {
+                    printf("reading gpio %dn", op->gpio);
+
+                    // TODO add error handling to make sure pin is in input mode
+                    read_val = gpio_get_level(op->gpio);
+                }
+                else if(!strcmp(action->name, "read_analog")) {
+                    printf("reading adc %dn", op->gpio);
+
+                    adc_num = 2;
+                    if (op->gpio >= 36) {
+                        adc_num = 1;
+                    }
+                    adc_chan = gpio_to_adc_chan(adc_num, op->gpio);
+
+                    if (action->repeat == 1) {
+                        read_val = adc_read_oneshot(adc_num, adc_chan);
+                    }
+                    else {
+                        printf("Defaulting to oneshot. Continuous analog read not supported.");
+                        // TODO implement continuous read
+                        read_val = adc_read_oneshot(adc_num, adc_chan);
+                    }
+
+                    client_payload.val = read_val;
+                    xQueueSend(udp_client_queue, &client_payload, portMAX_DELAY);
+                }
             }
-            else if (!strcmp(op->act_seq[a]->action, "down")) {
-                gpio_state = 0;
-                printf("setting gpio %d down for %d msec\n", op->gpio, op->act_seq[a]->duration);
-            }
-            gpio_set_level(op->gpio, gpio_state);
-            if (op->act_seq[a]->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
-                vTaskDelay(op->act_seq[a]->duration / portTICK_PERIOD_MS);
-                gpio_set_level(op->gpio, !gpio_state);
+            else {
+                if (!strcmp(action->name, "up")){
+                    gpio_state = 1;
+                    printf(
+                        "setting gpio %d up for %d msec\n",
+                        op->gpio, action->duration
+                    );
+                }
+                else if (!strcmp(action->name, "down")) {
+                    gpio_state = 0;
+                    printf(
+                        "setting gpio %d down for %d msec\n",
+                        op->gpio, action->duration
+                    );
+                }
+                else {
+                    printf(
+                        "Skipping unsupported action: %s\n",
+                        action->name
+                    );
+                    continue;
+                }
+
+                gpio_set_level(op->gpio, gpio_state);
+                if (action->duration > 0) { // if duration is defined, then this is a pulse for the duration, else the gpio stays in the state
+                    vTaskDelay(action->duration / portTICK_PERIOD_MS);
+                    gpio_set_level(op->gpio, !gpio_state);
+                }
             }
 
+
             // post-delay
-            if (op->act_seq[a]->delay_post > 0) {
-                printf("delaying after pulse for %d msec\n",op->act_seq[a]->delay_post);
-                vTaskDelay(op->act_seq[a]->delay_post / portTICK_PERIOD_MS);
+            if (action->delay_post > 0) {
+                printf("delaying after pulse for %d msec\n",action->delay_post);
+                vTaskDelay(action->delay_post / portTICK_PERIOD_MS);
             }
                
             // check repeat
             repeat_counter++;
-            if (repeat_counter == op->act_seq[a]->repeat) {
+            if (repeat_counter == action->repeat) {
                 repeat = 0;
             }
 	    }
@@ -640,57 +754,6 @@ void vTaskKill(void * pvParameters) {
     }
 }	
 
-void vTaskPolaris(void *pvParameters) {
-    char rx_buffer[POLARIS_CMD_MAX_LEN];
-    char *polaris_read_buf;
-    Polaris_frame frame;
-    polaris_read_buf = malloc(32768);
-    int streaming = 0;
-    TickType_t delay = portMAX_DELAY;
-
-    for (;;) {
-        if(xQueueReceive(polaris_queue, rx_buffer, delay) || streaming) {
-            if (streaming) {
-                polaris_read(&frame, polaris_read_buf);
-                xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
-                if (strlen(rx_buffer) == 0) {
-                    continue;
-                }
-            }
-            if (strcmp(rx_buffer, "polaris_init") == 0) {
-                streaming = 0;
-
-                // initialize polaris with correct baud rates
-                polaris_set_baudrate(9600); // in case of re-init
-                polaris_send_init_seq(polaris_read_buf);
-                polaris_set_baudrate(115200);
-
-                // read and send frame as ACK
-                polaris_read(&frame, polaris_read_buf);
-                xQueueSend(udp_client_queue, &frame, portMAX_DELAY);
-
-                rx_buffer[0] = '\0';
-                ESP_LOGI(TAG, "polaris state: init");
-            }
-            else if (strcmp(rx_buffer, "polaris_stream") == 0) {
-                streaming = 1;
-                delay = 0;
-                rx_buffer[0] = '\0';
-                ESP_LOGI(TAG, "polaris state: stream");
-            }
-            else if (strcmp(rx_buffer, "polaris_down") == 0) {
-                streaming = 0;
-                delay = portMAX_DELAY;
-                rx_buffer[0] = '\0';
-                ESP_LOGI(TAG, "polaris state: down");
-            }
-            else {
-                ESP_LOGE(TAG, "Unknown polaris command.");
-            }
-        }
-    }
-}
-
 // UDP client task function
 void udp_client_task( void * pvParameters ) {
     ESP_LOGI(TAG, "Client task started");
@@ -698,8 +761,7 @@ void udp_client_task( void * pvParameters ) {
     int ip_protocol = 0;
     int sock;
     struct sockaddr_in dest_addr;
-
-    Polaris_frame polaris_frame;
+    Client_payload client_payload;
 
     dest_addr.sin_addr.s_addr = inet_addr(HOST_IP_ADDR);
     dest_addr.sin_family = AF_INET;
@@ -715,16 +777,15 @@ void udp_client_task( void * pvParameters ) {
     ESP_LOGI(TAG, "Client Socket created");
 
     for (;;) {
-        if (xQueueReceive(udp_client_queue, &polaris_frame, portMAX_DELAY)) {
+        if (xQueueReceive(udp_client_queue, &client_payload, portMAX_DELAY)) {
             int err = sendto(
-                sock, &polaris_frame, 16, 0,
+                sock, &client_payload, sizeof(Client_payload), 0,
                 (struct sockaddr *)&dest_addr, sizeof(dest_addr)
             );
             if (err < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 return;
             }
-            // ESP_LOGI(TAG, "Polaris frame sent.");
         }
     }
 }
@@ -738,8 +799,109 @@ static void configure_led(void) {
     gpio_set_direction(LIGHT_OFF_GPIO, GPIO_MODE_OUTPUT);
 }
 
+/*---------------------------------------------------------------
+        ADC Calibration
+---------------------------------------------------------------*/
+static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle)
+{
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool calibrated = false;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
+        adc_cali_curve_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .chan = channel,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+    *out_handle = handle;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration Success");
+    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
+    } else {
+        ESP_LOGE(TAG, "Invalid arg or no memory");
+    }
+
+    return calibrated;
+}
+
+static void example_adc_calibration_deinit(adc_cali_handle_t handle)
+{
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    ESP_LOGI(TAG, "deregister %s calibration scheme", "Curve Fitting");
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
+
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    ESP_LOGI(TAG, "deregister %s calibration scheme", "Line Fitting");
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
+#endif
+}
+
+static void configure_analog(
+    adc_oneshot_unit_handle_t *handle,
+    adc_oneshot_unit_init_cfg_t *init_config,
+    adc_cali_handle_t adc_cali_chan_handle
+) {
+    //-------------ADC1 Init---------------//
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(init_config, handle));
+
+    //-------------ADC1 Config---------------//
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(*handle, ADC_CHANNEL_0, &config));
+
+    //-------------ADC1 Calibration Init---------------//
+    // TODO loop over all channels enabled and handle return value
+    example_adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_0, ADC_ATTEN, &adc_cali_chan_handle);
+}
+
+static void teardown_analog(
+    adc_oneshot_unit_handle_t *handle,
+    adc_cali_handle_t *adc_cali_chan_handle
+) {
+    //Tear Down
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(*handle));
+    // TODO loop over all channels enabled
+    example_adc_calibration_deinit(*adc_cali_chan_handle);
+}
+
 void app_main(void) {
+#if CONIFG_USE_INTERNAL_ETHERNET
     init_wesp32_eth();
+#endif
+#if CONFIG_USE_WIFI
+    wifi_init_sta(true);
+    // example_set_static_ip(eth_netif);
+#endif
+
 
     Server_params sp1;
     Server_params sp2;
@@ -757,10 +919,19 @@ void app_main(void) {
 
     configure_led();
 
-    polaris_setup_uart(9600);
+    // TODO configure all enabled channels across ADCs
+    adc_oneshot_unit_handle_t adc_handle_1;
+    adc_oneshot_unit_init_cfg_t adc_init_config_1 = {
+        .unit_id = ADC_UNIT_1,
+    };
+    adc_cali_handle_t adc_cali_chan_handle_1 = NULL;
+    configure_analog(&adc_handle_1, &adc_init_config_1, adc_cali_chan_handle_1);
+
 
     // create event queues
-    if (!(udp_client_queue = xQueueCreate(QUEUE_SIZE, sizeof(Polaris_frame)))) {
+    if (
+        !(udp_client_queue = xQueueCreate(QUEUE_SIZE, sizeof(Client_payload)))
+    ) {
         ESP_LOGE(TAG, "Could not create UDP client queue.");
     }
     if (!(kill_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
@@ -769,10 +940,6 @@ void app_main(void) {
  
     if (!(ledc_queue = xQueueCreate(QUEUE_SIZE, sizeof(Rx_buf)))) {
         ESP_LOGE(TAG, "Could not create ledc queue.");
-    }
-    
-    if (!(polaris_queue = xQueueCreate(QUEUE_SIZE, sizeof(char) * POLARIS_CMD_MAX_LEN))) {
-        ESP_LOGE(TAG, "Could not create polaris queue.");
     }
 
 
@@ -790,9 +957,9 @@ void app_main(void) {
     
     TaskHandle_t xTaskLEDC = NULL;
     xTaskCreate(vTaskLEDC, "LEDC", 4096, NULL, LEDC_PRIORITY, &xTaskLEDC);
-
-    TaskHandle_t xTaskPolaris = NULL;
-    xTaskCreate(vTaskPolaris, "POLARIS", 4096, NULL , POLARIS_PRIORITY , &xTaskPolaris);
     
     xTaskCreate(udp_client_task, "UDP_CLIENT", 1024*2, (void*)AF_INET , CLIENT_PRIORITY , NULL);
+
+    // TODO where to put this?
+    // teardown_analog(&adc_handle_1, &adc_init_config_1, adc_cali_chan_handle_1);
 }

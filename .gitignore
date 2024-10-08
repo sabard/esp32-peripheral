@@ -4,4 +4,4 @@ main/build/*
 sdkconfig*
 .python-version
 build/
-.__afs
+.__afs*

@@ -15,9 +15,9 @@ gpio_payload_4 = {                     # gpio operation dict
     "action_seq": [                 # list of action module dicts
         {
             "action": "up",     # up or down
-            "duration": 300,    # in ms, -1 for keeping state up/down
-            "delay_pre": 150,    # in ms, -1 for no delay before pulse
-            "delay_post": 150,   # in ms, -1 for no delay after pulse
+            "duration": 500,    # in ms, -1 for keeping state up/down
+            "delay_pre": 0,    # in ms, -1 for no delay before pulse
+            "delay_post": 2500,   # in ms, -1 for no delay after pulse
             "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely 
         },
     ],
@@ -89,7 +89,7 @@ gpio_payload_13 = {                     # gpio operation dict
 
 ledc_payload_4 = {                     # gpio operation dict
     "ledc": 4,                      # gpio pin to perform on
-    "freq": 70,     # in hz
+    "freq": 2,     # in hz
     "duty": 50,    # percent 
 }
 
@@ -106,6 +106,34 @@ b_payload = {                     # gpio operation dict
 
     ],
 }
+
+servo_payload = {                     # gpio operation dict
+    "gpio": 2,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "up",     # up or down
+            "duration": 500,    # in ms, -1 for keeping state up/down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
+            "delay_post": 2500,   # in ms, -1 for no delay after pulse
+            "repeat": -1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely
+        },
+
+    ],
+}
+
+read_payload = {                     # gpio operation dict
+    "gpio": 13,                      # gpio pin to perform on
+    "action_seq": [                 # list of action module dicts
+        {
+            "action": "read",     # up or down
+            "delay_pre": -1,    # in ms, -1 for no delay before pulse
+            "delay_post": -1,   # in ms, -1 for no delay after pulse
+            "repeat": 1,         # 1 for play action once, 2 for play action twice, etc; -1 for repeat indefinitely
+        },
+
+    ],
+}
+
 
 other_payload = {}
 
@@ -176,6 +204,10 @@ def main():
             payload = msgpack.packb(gpio_payload_13, use_bin_type=True)
         elif key == "l4":
             payload = msgpack.packb(ledc_payload_4, use_bin_type=True)
+        elif key == "s":
+            payload = msgpack.packb(servo_payload, use_bin_type=True)
+        elif key == "r13":
+            payload = msgpack.packb(read_payload, use_bin_type=True)
         elif key == "k":
             task_to_kill = input("kill task number:")
             other_payload.update({"killtasknum": int(task_to_kill)})

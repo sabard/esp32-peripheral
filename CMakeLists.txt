@@ -5,8 +5,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-#project(main)
-project(sample_project)
+project(esp32_peripheral)
 idf_build_get_property(python PYTHON)
 idf_build_get_property(project_dir PROJECT_DIR)
 idf_build_get_property(project_name PROJECT_NAME)
